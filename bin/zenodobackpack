@@ -93,6 +93,8 @@ if __name__ == '__main__':
     else:
         loglevel = logging.INFO
 
+    logging.basicConfig(format='[%(asctime)s] %(levelname)s: %(message)s',
+                            datefmt='%m/%d/%Y %I:%M:%S %p')
 
     if args.subparser_name == 'create':
         backpackCreator = zenodoClasses.ZenodoBackpackCreator(loglevel)
