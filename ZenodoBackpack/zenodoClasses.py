@@ -277,17 +277,16 @@ class ZenodoBackpackCreator:
         Returns nothing, unless input_directory is not a directory or output_file exists, which raises Exceptions
         """
 
+        if not str(output_file).endswith('.tar.gz'):
+            output_file = os.path.join('{}.tar.gz'.format(str(output_file)))
+
 
         if os.path.isfile(output_file) and force is False:
-            raise FileExistsError
+            raise FileExistsError('File exists. Please use --force to overwrite existing archives.')
         elif os.path.isfile(output_file) and force is True:
             os.remove(output_file)
         if not os.path.isdir(input_directory):
             raise NotADirectoryError('Only the archiving of directories is currently supported.')
-
-
-        if not str(output_file).endswith('.tar.gz'):
-            output_file = os.path.join('{}.tar.gz'.format(str(output_file)))
 
 
         logging.info('Reading files and calculating checksums.')
