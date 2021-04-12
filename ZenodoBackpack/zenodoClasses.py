@@ -24,8 +24,7 @@ CURRENT_ZENODO_BACKPACK_VERSION = 1
 class ZenodoBackpack:
 
     def __init__(self, loglevel):
-        logging.basicConfig(level=loglevel, format='[%(asctime)s] %(levelname)s: %(message)s',
-                            datefmt='%m/%d/%Y %I:%M:%S %p')
+        logging.getLogger().setLevel(loglevel)
 
     def download_and_extract(self, directory, DOI, no_check_version=False, progress_bar=False):
         """Actually do the download, to a given path. Also extract the archive,
@@ -255,8 +254,7 @@ class ZenodoBackpack:
 class ZenodoBackpackCreator:
 
     def __init__(self, loglevel):
-        logging.basicConfig(level=loglevel, format='[%(asctime)s] %(levelname)s: %(message)s',
-                            datefmt='%m/%d/%Y %I:%M:%S %p')
+        logging.getLogger().setLevel(loglevel)
 
     def create(self, input_directory, output_file, data_version, force=False):
 
