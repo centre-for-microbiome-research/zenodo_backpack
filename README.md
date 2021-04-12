@@ -27,9 +27,9 @@ An uploaded existing ZenodoBackpack can be downloaded (--bar if a graphical prog
 
 ``zenodobackpack download --doi <MY.DOI/111> --output_directory <OUTPUT_DIRECTORY> --bar``
 
-#### Library
+#### Import
 
-You can also import ZenodoBackpack as a library: 
+You can also import ZenodoBackpack as a module: 
 
 ``from ZenodoBackpack import zenodoClasses``
 
