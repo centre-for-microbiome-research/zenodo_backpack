@@ -42,6 +42,7 @@ Instantiate the classes by using the appropriate logging level:
 And then utilize them where necessary: 
 
 ``backpackCreater.create("/path/to/DIR_DO_BE_ARCHIVED", "path/to/archive.tar.gz", version, force=True)``
+
 ``backpackDownloader.download_and_extract('/path/to/download_directory', 'MY.DOI/111111', progress_bar=True, no_check_version=False)``
 
 Neither class returns anything unless an error is encountered, in which case a relevant Exception is raised. 
