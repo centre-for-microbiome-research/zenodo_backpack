@@ -25,7 +25,7 @@ In command line, zenodobackpack can create an archive to be uploaded to Zenodo:
 
 An uploaded existing ZenodoBackpack can be downloaded (--bar if a graphical progress bar is desired) and unpacked as follows: 
 
-``zenodobackpack download --doi <<Y_DOI> --output_directory <OUTPUT_DIRECTORY> --bar``
+``zenodobackpack download --doi <MY.DOI/111> --output_directory <OUTPUT_DIRECTORY> --bar``
 
 #### Library
 
