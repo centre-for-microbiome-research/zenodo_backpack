@@ -287,6 +287,8 @@ class ZenodoBackpackCreator:
             os.remove(output_file)
         if not os.path.isdir(input_directory):
             raise NotADirectoryError('Only the archiving of directories is currently supported.')
+        if os.path.isdir(output_file):
+            raise IsADirectoryError('Cannot specify existing directory as output. Output must be named *.tar.gz file.')
 
 
         logging.info('Reading files and calculating checksums.')
