@@ -13,7 +13,7 @@ import logging
 
 sys.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)),'..')] + sys.path
 
-from ZenodoBackpack import zenodoClasses
+import zenodo_backpack
 
 
 
@@ -37,14 +37,14 @@ if __name__ == '__main__':
         subparser_name_to_parser[parser_name] = subpar
         return subpar
 
-    create_description = 'Creates a ZenodoBackpack archive from target directory, resulting in a .tar.gz ' \
-                         'file with checksum information. The archive be uploaded to Zenodo and downloaded by ZenodoBackpack in the future\n\n' \
+    create_description = 'Creates a zenodo_backpack archive from target directory, resulting in a .tar.gz ' \
+                         'file with checksum information. The archive be uploaded to Zenodo and downloaded by zenodo_backpack in the future\n\n' \
                          'Note that a version of your data must be provided, and the SAME version must be specified in Zenodo metadata.\n\n' \
-                         '\t\tExample use: zenodobackpack create --input_directory <./INPUT_DIRECTORY> --data_version <VERSION> --output_file <./ARCHIVE.tar.gz> '
+                         '\t\tExample use: zenodo_backpack create --input_directory <./INPUT_DIRECTORY> --data_version <VERSION> --output_file <./ARCHIVE.tar.gz> '
 
     download_description = 'Given a DOI, downloads file from Zenodo and extracts it to output_directory. ' \
-                           'Must point to a DOI containing a ZenodoBackpack-created archive.\n\n' \
-                           '\t\tExample use: zenodobackpack download --doi <DOI> --output_directory <OUTPUT_DIRECTORY> --bar'
+                           'Must point to a DOI containing a zenodo_backpack-created archive.\n\n' \
+                           '\t\tExample use: zenodo_backpack download --doi <DOI> --output_directory <OUTPUT_DIRECTORY> --bar'
 
 
     create_parser = new_subparser(subparsers, 'create', create_description)
@@ -76,11 +76,11 @@ if __name__ == '__main__':
 
 
     if (len(sys.argv) == 1 or sys.argv[1] == '-h' or sys.argv[1] == '--help' or sys.argv[1] == 'help'):
-        print('\n                ...::: zenodobackpack ' + __version__ + ' :::...''')
+        print('\n                ...::: zenodo_backpack ' + __version__ + ' :::...''')
         print('\n\n  General usage:')
-        print('    zenodobackpack create         -> %s' % 'Creates a *.tar.gz ZenodoBackpack archive from target directory')
-        print('    zenodobackpack download       -> %s' % 'Given a DOI, downloads file from Zenodo and extracts it to output_directory.')
-        print('\n\n  Use zenodobackpack <command> -h for command-specific help.\n')
+        print('    zenodo_backpack create         -> %s' % 'Creates a *.tar.gz zenodo_backpack archive from target directory')
+        print('    zenodo_backpack download       -> %s' % 'Given a DOI, downloads file from Zenodo and extracts it to output_directory.')
+        print('\n\n  Use zenodo_backpack <command> -h for command-specific help.\n')
         sys.exit(0)
 
     else:
@@ -97,11 +97,11 @@ if __name__ == '__main__':
                             datefmt='%m/%d/%Y %I:%M:%S %p')
 
     if args.subparser_name == 'create':
-        backpackCreator = zenodoClasses.ZenodoBackpackCreator(loglevel)
+        backpackCreator = zenodo_backpack.zenodo_backpack_creator(loglevel)
         backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force)
 
     elif args.subparser_name == 'download':
-        backpackDownloader = zenodoClasses.ZenodoBackpack(loglevel)
+        backpackDownloader = zenodo_backpack.zenodo_backpack(loglevel)
         backpackDownloader.download_and_extract(args.output_directory, args.doi, args.no_check_version, args.bar)
 
 
