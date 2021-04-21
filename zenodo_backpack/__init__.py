@@ -21,7 +21,7 @@ class ZenodoConnectionException(Exception):
 CURRENT_ZENODO_BACKPACK_VERSION = 1
 
 
-class zenodo_backpack:
+class zenodo_backpack_downloader:
 
     def __init__(self, loglevel):
         logging.getLogger().setLevel(loglevel)
