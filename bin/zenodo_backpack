@@ -101,7 +101,7 @@ if __name__ == '__main__':
         backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force)
 
     elif args.subparser_name == 'download':
-        backpackDownloader = zenodo_backpack.zenodo_backpack(loglevel)
+        backpackDownloader = zenodo_backpack.zenodo_backpack_downloader(loglevel)
         backpackDownloader.download_and_extract(args.output_directory, args.doi, args.no_check_version, args.bar)
 
 
