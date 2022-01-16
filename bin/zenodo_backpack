@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 ###############################################################################
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __maintainer__ = "Alex Chklovski"
 __email__ = "chklovski near gmail.com"
 
@@ -97,11 +97,11 @@ if __name__ == '__main__':
                             datefmt='%m/%d/%Y %I:%M:%S %p')
 
     if args.subparser_name == 'create':
-        backpackCreator = zenodo_backpack.zenodo_backpack_creator(loglevel)
+        backpackCreator = zenodo_backpack.zenodoBackpackCreator(loglevel)
         backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force)
 
     elif args.subparser_name == 'download':
-        backpackDownloader = zenodo_backpack.zenodo_backpack_downloader(loglevel)
+        backpackDownloader = zenodo_backpack.zenodoBackpackDownloader(loglevel)
         backpackDownloader.download_and_extract(args.output_directory, args.doi, args.no_check_version, args.bar)
 
 

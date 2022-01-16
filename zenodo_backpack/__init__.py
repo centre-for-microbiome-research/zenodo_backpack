@@ -8,11 +8,14 @@ from tqdm import tqdm
 import tarfile
 import tempfile
 
+
 class ZenodoBackpackMalformedException(Exception):
     pass  # No implementation needed
 
+
 class ZenodoBackpackVersionException(Exception):
     pass
+
 
 class ZenodoConnectionException(Exception):
     pass
@@ -21,7 +24,7 @@ class ZenodoConnectionException(Exception):
 CURRENT_ZENODO_BACKPACK_VERSION = 1
 
 
-class zenodo_backpack_downloader:
+class zenodoBackpackDownloader:
 
     def __init__(self, loglevel):
         logging.getLogger().setLevel(loglevel)
@@ -41,13 +44,13 @@ class zenodo_backpack_downloader:
         Returns nothing
         """
 
-        #get record via DOI, then read in json metadata from records_url
+        # get record via DOI, then read in json metadata from records_url
         if DOI is not None:
 
             recordID = self._retrieve_record_ID(DOI)
             metadata, files = self._retrieve_record_metadata(recordID)
 
-            #create md5sums file for download
+            # create md5sums file for download
             with open(os.path.join(directory, 'md5sums.txt'), 'wt') as md5file:
                 for file in files:
                     fname = str(file['key']).split('/')[-1]
@@ -59,7 +62,7 @@ class zenodo_backpack_downloader:
                 filename = f['key'].split('/')[-1]
                 checksum = f['checksum']
 
-                #3 retries
+                # 3 retries
                 for _ in range(3):
                     try:
                         self._download_file(link, os.path.join(directory, filename), progress_bar)
@@ -71,22 +74,22 @@ class zenodo_backpack_downloader:
                 else:
                     raise ZenodoConnectionException('Too many unsuccessful retries. Download is aborted')
 
-
                 if self._check_hash(filename, checksum):
                     logging.debug('Correct checksum for downloaded file.')
                 else:
                     os.remove(filename)
-                    raise ZenodoBackpackMalformedException('Checksum is incorrect for downloaded file. Please download again.')
+                    raise ZenodoBackpackMalformedException(
+                        'Checksum is incorrect for downloaded file. Please download again.')
             else:
                 logging.debug('All files have been downloaded.')
 
         else:
             raise ZenodoConnectionException('Record could not get accessed.')
 
-        #unzip
-        #use md5sums.txt file created from metadata to get files
+        # unzip
+        # use md5sums.txt file created from metadata to get files
         downloaded_files = [[str(i) for i in line.strip().split(',')] for line in
-                        open(os.path.join(directory, 'md5sums.txt'),'r').readlines()]
+                            open(os.path.join(directory, 'md5sums.txt'), 'r').readlines()]
         zipped_files = [item for sublist in downloaded_files for item in sublist if '.tar.gz' in item]
 
         logging.info('Extracting files from archive...')
@@ -98,12 +101,18 @@ class zenodo_backpack_downloader:
             os.remove(filepath)
 
         os.remove(os.path.join(directory, 'md5sums.txt'))
-        self._verify(directory, metadata, no_check_version)
-        os.remove(os.path.join(directory, 'CONTENTS.json'))
 
+        if no_check_version:
+            self.verify(directory)
+        else:
+            self.verify(directory, metadata)
 
-    def _verify(self, directory, metadata, no_check_version):
+        # os.remove(os.path.join(directory, 'CONTENTS.json'))
+
+    def verify(self, directory, metadata=None):
         """Verify that a downloaded directory is in working order.
+
+        If metadata downloaded from Zenodo is provided, it will be checked as well.
 
         Reads <CONTENTS.json> (file) within directory containing md5 sums for files a single extracted
         payload folder with an arbitrary name
@@ -127,26 +136,24 @@ class zenodo_backpack_downloader:
         except:
             raise ZenodoBackpackMalformedException('Failed to load CONTENTS.json')
 
-        #pop identifying keys for version and zenodo_backpack_version
+        # pop identifying keys for version and zenodo_backpack_version
         version = contents.pop('version')
         zenodo_backpack_version = contents.pop('zenodo_backpack_version')
 
-
-        if not no_check_version:
+        if metadata is not None:
             logging.info('Verifying version and checksums...')
             if str(version).strip() != str(metadata['metadata']['version']).strip():
-                raise ZenodoBackpackMalformedException('Version in CONTENTS.json does not match version in Zenodo metadata.')
+                raise ZenodoBackpackMalformedException(
+                    'Version in CONTENTS.json does not match version in Zenodo metadata.')
         else:
-            logging.warning('Version verification is turned off.')
+            logging.warning('Not using zenodo metadata verification.')
             logging.info('Verifying checksums...')
 
         if zenodo_backpack_version != CURRENT_ZENODO_BACKPACK_VERSION:
             raise ZenodoBackpackVersionException('Incorrect ZENODO Backpack version: {} Expected: {}'
-                          .format(zenodo_backpack_version, CURRENT_ZENODO_BACKPACK_VERSION))
+                                                 .format(zenodo_backpack_version, CURRENT_ZENODO_BACKPACK_VERSION))
 
-
-
-        #The rest of contents should only be files with md5 sums.
+        # The rest of contents should only be files with md5 sums.
 
         for payload_file in contents.keys():
             filepath = os.path.join(directory, payload_file)
@@ -154,6 +161,7 @@ class zenodo_backpack_downloader:
                 raise ZenodoBackpackMalformedException('Extracted file md5 sum does not match that in JSON file.')
 
         logging.info('Verification success.')
+
     def _retrieve_record_ID(self, DOI):
         """Parses provided DOI retrieve associated Zenodo URL which also contains record ID
         Arguments:
@@ -245,13 +253,34 @@ class zenodo_backpack_downloader:
                 with open(out_file, 'wb') as f:
                     shutil.copyfileobj(r.raw, f)
 
-
     def _extract_all(self, archive, extract_path):
         for filename in archive:
             shutil.unpack_archive(filename, extract_path)
 
+    def acquire(self, env_var_name, md5sum=False):
+        ''' Look for folder corresponding to an environmental variable and return it.
 
-class zenodo_backpack_creator:
+        Optionally, use the contents.json file to verify files'''
+
+        if env_var_name not in os.environ:
+            logging.error('Could not find requested environmental variable. Please check it exists.')
+            return None
+        else:
+            basefolder = os.environ[env_var_name]
+
+            if os.path.isdir(basefolder):
+                if 'CONTENTS.json' in os.listdir(basefolder):
+                    logging.info('Retrieval successful. Location of {} is: {}'.format(env_var_name, basefolder))
+
+                    if md5sum:
+                        self.verify(basefolder)
+
+                    return basefolder
+
+            return None
+
+
+class zenodoBackpackCreator:
 
     def __init__(self, loglevel):
         logging.getLogger().setLevel(loglevel)
@@ -280,7 +309,6 @@ class zenodo_backpack_creator:
         if not str(output_file).endswith('.tar.gz'):
             output_file = os.path.join('{}.tar.gz'.format(str(output_file)))
 
-
         if os.path.isfile(output_file) and force is False:
             raise FileExistsError('File exists. Please use --force to overwrite existing archives.')
         elif os.path.isfile(output_file) and force is True:
@@ -290,10 +318,9 @@ class zenodo_backpack_creator:
         if os.path.isdir(output_file):
             raise IsADirectoryError('Cannot specify existing directory as output. Output must be named *.tar.gz file.')
 
-
         logging.info('Reading files and calculating checksums.')
 
-        #recursively get a list of files in the input_directory and md5 sum for each file
+        # recursively get a list of files in the input_directory and md5 sum for each file
 
         try:
             _, filenames = self._scandir(input_directory)
@@ -301,23 +328,21 @@ class zenodo_backpack_creator:
             logging.error(e)
             raise e
 
-
-        #Generate md5 sums & make JSON relative to input_directory folder
+        # Generate md5 sums & make JSON relative to input_directory folder
         parent_dir = str(os.path.abspath(os.path.join(input_directory, os.pardir)))
         base_folder = os.path.basename(os.path.normpath(input_directory))
 
         contents = {str(file).replace(parent_dir, ""): self._md5sum_file(file) for file in filenames}
 
-        #add metadata to contents:
+        # add metadata to contents:
         contents['zenodo_backpack_version'] = CURRENT_ZENODO_BACKPACK_VERSION
         contents['version'] = data_version
 
-        #write json to /tmp
+        # write json to /tmp
         tmpdir = tempfile.TemporaryDirectory()
         contents_json = os.path.join(tmpdir.name, 'CONTENTS.json')
         with open(contents_json, 'w') as c:
-             json.dump(contents, c)
-
+            json.dump(contents, c)
 
         logging.info('Creating archive at: {}'.format(output_file))
 
@@ -328,8 +353,6 @@ class zenodo_backpack_creator:
         tmpdir.cleanup()
 
         logging.info('ZenodoBackpack created successfully!')
-
-
 
     def _md5sum_file(self, file):
         """Computes MD5 sum of file.
@@ -369,4 +392,3 @@ class zenodo_backpack_creator:
             files.extend(f)
 
         return subfolders, files
-
