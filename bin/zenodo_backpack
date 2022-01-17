@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument('--debug', help='output debug information', action="store_true")
-    parent_parser.add_argument('--version', help='output version information and quit',  action='version', version=__version__)
+    parent_parser.add_argument('--version', help='output version information and quit',  action='version', version=zenodo_backpack.__version__)
     parent_parser.add_argument('--quiet', help='only output errors', action="store_true")
 
     parser = argparse.ArgumentParser(parents=[parent_parser])
@@ -53,7 +53,7 @@ if __name__ == '__main__':
 
     create_arguments.add_argument('--input_directory', '--input-directory', '-i', help="Path to folder to be archived.", required=True)
     create_arguments.add_argument('--output_file', '--output-file', '-o', help="Path to output file in the format *.tar.gz", required=True)
-    create_arguments.add_argument('--data_version', help="Version of data to be archived. Must correspond to version specified in Zenodo metadata.", required=True)
+    create_arguments.add_argument('--data_version', '--data-version', help="Version of data to be archived. Must correspond to version specified in Zenodo metadata.", required=True)
 
     create_arguments = create_parser.add_argument_group('additional arguments')
     create_arguments.add_argument('--force', action='store_true', help='Overwrite output file if exists [default: do not overwrite]', default=False)
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     download_arguments.add_argument('--bar', help="Show graphical progress bar for download. Default: [do not show]",
                                   action='store_true', default=False)
 
-    download_arguments.add_argument('--no_check_version', help="Do not verify version specified in CONTENTS.json in archive matches official Zenodo record. Default: [Verify]",
+    download_arguments.add_argument('--no_check_version', '--no-check-version', help="Do not verify version specified in CONTENTS.json in archive matches official Zenodo record. Default: [Verify]",
                                   action='store_true', default=False)
 
 
@@ -93,15 +93,17 @@ if __name__ == '__main__':
     else:
         loglevel = logging.INFO
 
-    logging.basicConfig(format='[%(asctime)s] %(levelname)s: %(message)s',
-                            datefmt='%m/%d/%Y %I:%M:%S %p')
+    logging.basicConfig(level=loglevel, 
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%m/%d/%Y %I:%M:%S %p')
+    logging.info("Zenodo Backpack v{}".format(__version__))
 
     if args.subparser_name == 'create':
-        backpackCreator = zenodo_backpack.zenodoBackpackCreator(loglevel)
+        backpackCreator = zenodo_backpack.ZenodoBackpackCreator()
         backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force)
 
     elif args.subparser_name == 'download':
-        backpackDownloader = zenodo_backpack.zenodoBackpackDownloader(loglevel)
-        backpackDownloader.download_and_extract(args.output_directory, args.doi, args.no_check_version, args.bar)
+        backpackDownloader = zenodo_backpack.ZenodoBackpackDownloader()
+        backpackDownloader.download_and_extract(args.output_directory, args.doi, not args.no_check_version, args.bar)
 
 
