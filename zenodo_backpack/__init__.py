@@ -7,6 +7,7 @@ import json
 from tqdm import tqdm
 import tarfile
 import tempfile
+import sys
 
 from .version import __version__
 
@@ -29,7 +30,14 @@ PAYLOAD_DIRECTORY_KEY = 'payload_directory'
 class ZenodoBackpack:
     def __init__(self, base_directory):
         self.base_directory = base_directory
-        self.contents = json.load(os.path.join(base_directory, 'CONTENTS.json'))
+
+        try:
+            with open(os.path.join(self.base_directory, 'CONTENTS.json')) as jsonfile:
+                self.contents = json.load(jsonfile)
+        except:
+            raise ZenodoBackpackMalformedException('Failed to load CONTENTS.json')
+        self.zenodo_backpack_version = self.contents['zenodo_backpack_version']
+        self.data_version = self.contents['data_version']
 
     def payload_directory_string(self):
         return os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
@@ -55,6 +63,9 @@ class ZenodoBackpackDownloader:
             Number of download attempts
         Returns nothing
         """
+
+
+        self._make_sure_path_exists(directory)
 
         # get record via DOI, then read in json metadata from records_url
         if doi is not None:
@@ -86,7 +97,7 @@ class ZenodoBackpackDownloader:
                 else:
                     raise ZenodoConnectionException('Too many unsuccessful retries. Download is aborted')
 
-                if self._check_hash(filename, checksum):
+                if self._check_hash(os.path.join(directory, filename), checksum):
                     logging.debug('Correct checksum for downloaded file.')
                 else:
                     raise ZenodoBackpackMalformedException(
@@ -108,19 +119,37 @@ class ZenodoBackpackDownloader:
             filepath = (os.path.join(directory, f))
             logging.debug('Extracting {}'.format(filepath))
             tf = tarfile.open(filepath)
+            zb_folder = os.path.commonprefix(tf.getnames())
             tf.extractall(directory)
             os.remove(filepath)
 
         os.remove(os.path.join(directory, 'md5sums.txt'))
 
-        if no_check_version:
-            self.verify(directory)
+        zb_folder = os.path.abspath(os.path.join(directory, zb_folder))
+
+        # Write 'payload_directory' key
+        # This points to the payload folder containing actual data originally archived into the ZB
+
+        with open(os.path.join(zb_folder, 'CONTENTS.json')) as json_file:
+            contents = json.load(json_file)
+
+        contents['payload_directory'] = os.path.join(zb_folder, PAYLOAD_DIRECTORY_KEY)
+
+        with open(os.path.join(zb_folder, 'CONTENTS.json'), 'w') as json_file:
+            json.dump(contents, json_file)
+
+        ZB = ZenodoBackpack(zb_folder)
+
+        if not check_version:
+            self.verify(ZB)
         else:
-            self.verify(directory, metadata)
+            self.verify(ZB, metadata=metadata)
+
+        return ZB
 
         # os.remove(os.path.join(directory, 'CONTENTS.json'))
 
-    def verify(self, directory, metadata=None):
+    def verify(self, zenodo_backpack, metadata=None, passed_version=None):
         """Verify that a downloaded directory is in working order.
 
         If metadata downloaded from Zenodo is provided, it will be checked as well.
@@ -134,28 +163,36 @@ class ZenodoBackpackDownloader:
             Location of downloaded and extracted data
         metadata: json dict
             Downloaded metadata from Zenodo containing version information
+        passed_version: str
+            Passed specific version to verify
 
         Returns nothing if verification works, otherwise raises
         ZenodoBackpackMalformedException or ZenodoBackpackVersionException
         """
 
-        try:
-            with open(os.path.join(directory, 'CONTENTS.json')) as json_file:
-                contents = json.load(json_file)
-        except:
-            raise ZenodoBackpackMalformedException('Failed to load CONTENTS.json')
+
 
         # pop identifying keys for version and zenodo_backpack_version
-        version = contents.pop('version')
-        zenodo_backpack_version = contents.pop('zenodo_backpack_version')
+        version = zenodo_backpack.data_version
+        zenodo_backpack_version = zenodo_backpack.zenodo_backpack_version
+        payload_folder = zenodo_backpack.payload_directory_string()
 
-        if metadata is not None:
+        if metadata:
             logging.info('Verifying version and checksums...')
-            if str(version).strip() != str(metadata['metadata']['version']).strip():
+            metadata_ver = str(metadata['metadata']['version']).strip()
+
+            if str(version).strip() != metadata_ver:
                 raise ZenodoBackpackMalformedException(
-                    'Version in CONTENTS.json does not match version in Zenodo metadata.')
+                    f'Version in CONTENTS.json: {version} does not match version in Zenodo metadata: {metadata_ver}')
+
+        elif passed_version:
+            logging.info('Verifying version and checksums...')
+            if str(version).strip() != str(passed_version).strip():
+                raise ZenodoBackpackMalformedException(
+                    f'Version in CONTENTS.json: {version} does not match version provided: {passed_version}')
+
         else:
-            logging.warning('Not using zenodo metadata verification.')
+            logging.warning('Not using version verification.')
             logging.info('Verifying checksums...')
 
         if zenodo_backpack_version != CURRENT_ZENODO_BACKPACK_VERSION:
@@ -164,9 +201,9 @@ class ZenodoBackpackDownloader:
 
         # The rest of contents should only be files with md5 sums.
 
-        for payload_file in contents.keys():
-            filepath = os.path.join(directory, payload_file)
-            if not self._check_hash(filepath, contents[payload_file], metadata=False):
+        for payload_file in zenodo_backpack.contents['md5sums'].keys():
+            filepath = os.path.join(os.path.split(payload_folder)[0], payload_file[1:]) # remove slash to enable os.path.join
+            if not self._check_hash(filepath, zenodo_backpack.contents['md5sums'][payload_file], metadata=False):
                 raise ZenodoBackpackMalformedException('Extracted file md5 sum does not match that in JSON file.')
 
         logging.info('Verification success.')
@@ -226,7 +263,7 @@ class ZenodoBackpackDownloader:
             value = checksum
 
         if not os.path.exists(filename):
-            return value, 'invalid'
+            raise FileNotFoundError
         h = hashlib.new(algorithm)
         with open(filename, 'rb') as f:
             while True:
@@ -235,6 +272,7 @@ class ZenodoBackpackDownloader:
                     break
                 h.update(data)
         digest = h.hexdigest()
+
         return value == digest
 
     def _download_file(self, file_url, out_file, progress_bar=False):
@@ -267,7 +305,7 @@ class ZenodoBackpackDownloader:
         for filename in archive:
             shutil.unpack_archive(filename, extract_path)
 
-    def acquire(self, path=None, env_var_name=None, md5sum=False):
+    def acquire(self, path=None, env_var_name=None, md5sum=False, version=None):
         ''' Look for folder corresponding to a path or environmental variable and
         return it.
 
@@ -307,16 +345,36 @@ class ZenodoBackpackDownloader:
             if 'CONTENTS.json' in os.listdir(basefolder):
                 logging.info('Retrieval successful. Location of backpack is: {}'.format(basefolder))
 
+                ZB = ZenodoBackpack(basefolder)
+
                 if md5sum:
                     self.verify(basefolder)
+                elif version:
+                    if version != ZB.data_version:
+                        raise ZenodoBackpackMalformedException(
+                    f'Version in CONTENTS.json: {ZB.data_version} does not match version provided: {version}')
 
-                return basefolder
+                return ZB
+
+
             else:
                 raise ZenodoBackpackMalformedException(f"{logging_description} does not contain a CONTENTS.json file, so is not a valid ZenodoBackpack")
         else:
             raise ZenodoBackpackMalformedException(f"{logging_description} is not a directory so cannot hold a ZenodoBackpack")
 
         raise Exception("Error: acquire requires either a path or an environment variable to be specified")
+
+    def _make_sure_path_exists(self, path):
+        """Create directory if it does not exist."""
+        if not path:
+            return
+
+        if not os.path.exists(path):
+            try:
+                os.makedirs(path)
+            except Exception as e:
+                    logging.error('Specified path does not exist: ' + path + '\n')
+                    raise e
 
 
 class ZenodoBackpackCreator:
@@ -343,7 +401,7 @@ class ZenodoBackpackCreator:
         """
 
         if not str(output_file).endswith('.tar.gz'):
-            output_file = os.path.join('{}.tar.gz'.format(str(output_file)))
+            output_file = os.path.join('{}.zb.tar.gz'.format(str(output_file)))
 
         if os.path.isfile(output_file) and force is False:
             raise FileExistsError('File exists. Please use --force to overwrite existing archives.')
@@ -368,11 +426,15 @@ class ZenodoBackpackCreator:
         parent_dir = str(os.path.abspath(os.path.join(input_directory, os.pardir)))
         base_folder = os.path.basename(os.path.normpath(input_directory))
 
-        contents = {str(file).replace(parent_dir, ""): self._md5sum_file(file) for file in filenames}
+
+        contents = {}
+
+        contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY_KEY): self._md5sum_file(file) for file in filenames}
 
         # add metadata to contents:
         contents['zenodo_backpack_version'] = CURRENT_ZENODO_BACKPACK_VERSION
-        contents['version'] = data_version
+        contents['data_version'] = data_version
+
 
         # write json to /tmp
         tmpdir = tempfile.TemporaryDirectory()
@@ -383,8 +445,11 @@ class ZenodoBackpackCreator:
         logging.info('Creating archive at: {}'.format(output_file))
 
         archive = tarfile.open(os.path.join(output_file), "w|gz")
-        archive.add(contents_json, 'CONTENTS.json')
-        archive.add(input_directory, arcname=base_folder)
+
+        root_folder_name = f'{base_folder}.zb'
+
+        archive.add(contents_json, os.path.join(root_folder_name, 'CONTENTS.json'))
+        archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY_KEY))
         archive.close()
         tmpdir.cleanup()
 
