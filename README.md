@@ -16,9 +16,9 @@ for robust verification.
 It contains two main methods, which can bee accessed through the
 `zenodo_backpack` script or accessed as a software library:
 
-**create**: turns a target directory into a zenodo_backpack-formatted .tar.gz archive with relevant checksum and version information, ready to be uploaded to Zenodo
+**create**: turns a target directory into a zenodo_backpack-formatted .tar.gz archive with relevant checksum and version information, ready to be uploaded to Zenodo. It is necessary to provide a data version when doing so - furthermore, when uploading this backpack to zenodo.org, the version specified on the website **must** match that provided when the ZenodoBackpack was created. This allows version tracking and version validation of the data contained within the ZenodoBackpack. 
      
-**download_and_extract**: takes a DOI string to download, extract and verify a zenodo_backpack archive from Zenodo.org to target directory. 
+**download_and_extract**: takes a DOI string to download, extract and verify a zenodo_backpack archive from Zenodo.org to target directory. This returns a ZenodoBackpack object that can be queried for information. 
     
 
 # Usage
@@ -40,7 +40,7 @@ An uploaded existing zenodo_backpack can be downloaded (--bar if a graphical pro
 zenodo_backpack download --doi <MY.DOI/111> --output_directory <OUTPUT_DIRECTORY> --bar
 ```
 
-#### Import
+#### Import and API usage
 
 You can also import zenodo_backpack as a module: 
 
@@ -58,7 +58,17 @@ And then utilize them where necessary:
 
 ``backpack_downloader.download_and_extract('/path/to/download_directory', 'MY.DOI/111111', progress_bar=True, check_version=False)``
 
-Neither class returns anything unless an error is encountered, in which case a relevant Exception is raised. 
+The backpack_downloader also has an **acquire** method that can take either a path or an environmental variable and check if a valid ZenodoBackpack is found.  Optionally, it can check the md5sum of the files within the backpack to ensure file integrity:
+
+``backpack_downloader.acquire(path='/path/to/zenodobackpack/', md5sum=True)``
+
+The acquire method can also check that the ZenodoBackpack queries has the expected version, and will raise a ZenodoBackpackMalformedException if the versions do not match: 
+
+``backpack_downloader.acquire(env_var_name='MyZenodoBackpack', version=1.5.2)``
+
+Both the download_and_extract as well as the acquire method return a ZenodoBackpack object which contains useful information. For example, it can return the path to the payload directory within the ZenodoBackpack containing all the data archived into the ZenodoBackpack: 
+
+``useful_data_path = backpack_downloader.acquire(env_var_name='MyZenodoBackpack', version=1.5.2).payload_directory_string()``
 
 
 # Installation
