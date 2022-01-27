@@ -38,14 +38,6 @@ class ZenodoBackpack:
             raise ZenodoBackpackMalformedException('Failed to load CONTENTS.json')
         self.zenodo_backpack_version = self.contents['zenodo_backpack_version']
         self.data_version = self.contents['data_version']
-        
-        @property
-        def zenodo_backpack_version(self):
-            return self.zenodo_backpack_version
-            
-        @property
-        def data_version(self):
-            return self.data_version
 
     def payload_directory_string(self):
         return os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
