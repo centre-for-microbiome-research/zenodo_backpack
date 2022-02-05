@@ -43,6 +43,63 @@ class ZenodoBackpack:
         return os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
 
 
+def acquire(path=None, env_var_name=None, md5sum=False, version=None):
+    ''' Look for folder corresponding to a path or environmental variable and
+    return it.
+
+    Parameters
+    ----------
+    path: str
+        Path to the backpack. Cannot be used with env_var_name.
+    env_var_name: str
+        Name of an environment variable that contains a path to a backpack
+    md5sum: bool
+        If True, use the contents.json file to verify files.
+    version: str
+        Excpected version of the backpack. If not provided, the version in the CONTENTS.json file is checked.
+    
+    Raises
+    ------
+    ZenodoBackpackMalformedException: 
+        If the environment variable does not point to a valid ZenodoBackpack
+        i.e. a directory with a CONTENTS.json in it.
+    ZenodoBackpackVersionException:
+        If not expected Backpack version
+    '''
+
+    if path:
+        logging_description = "Path {}".format(path)
+        basefolder = path
+
+    elif env_var_name:
+        logging_description = f"Environment variable {env_var_name}"
+        if env_var_name not in os.environ:
+            raise ZenodoBackpackMalformedException(f'Environment variable {env_var_name} was undefined. Please check it exists.')
+        else:
+            basefolder = os.environ[env_var_name]
+    else:
+        raise ZenodoBackpackMalformedException()
+
+    if os.path.isdir(basefolder):
+        if 'CONTENTS.json' in os.listdir(basefolder):
+            logging.info('Retrieval successful. Location of backpack is: {}'.format(basefolder))
+
+            zb = ZenodoBackpack(basefolder)
+
+            if version:
+                if version != zb.data_version:
+                    raise ZenodoBackpackMalformedException(
+                f'Version in CONTENTS.json: {zb.data_version} does not match version provided: {version}')
+            if md5sum:
+                ZenodoBackpackDownloader().verify(basefolder)
+            return zb
+
+        else:
+            raise ZenodoBackpackMalformedException(f"{logging_description} does not contain a CONTENTS.json file, so is not a valid ZenodoBackpack")
+    else:
+        raise ZenodoBackpackMalformedException(f"{logging_description} is not a directory so cannot hold a ZenodoBackpack")
+
+
 class ZenodoBackpackDownloader:
 
     def download_and_extract(self, directory, doi, check_version=True, progress_bar=False, download_retries=3):
@@ -61,10 +118,9 @@ class ZenodoBackpackDownloader:
             If True, check Zenodo metadata verifies
         download_retries: int
             Number of download attempts
-        Returns nothing
+
+        Returns a ZenodoBackpack object containing the downloaded files
         """
-
-
         self._make_sure_path_exists(directory)
 
         # get record via DOI, then read in json metadata from records_url
@@ -138,16 +194,14 @@ class ZenodoBackpackDownloader:
         with open(os.path.join(zb_folder, 'CONTENTS.json'), 'w') as json_file:
             json.dump(contents, json_file)
 
-        ZB = ZenodoBackpack(zb_folder)
+        zb = ZenodoBackpack(zb_folder)
 
         if not check_version:
-            self.verify(ZB)
+            self.verify(zb)
         else:
-            self.verify(ZB, metadata=metadata)
+            self.verify(zb, metadata=metadata)
 
-        return ZB
-
-        # os.remove(os.path.join(directory, 'CONTENTS.json'))
+        return zb
 
     def verify(self, zenodo_backpack, metadata=None, passed_version=None):
         """Verify that a downloaded directory is in working order.
@@ -305,65 +359,6 @@ class ZenodoBackpackDownloader:
         for filename in archive:
             shutil.unpack_archive(filename, extract_path)
 
-    def acquire(self, path=None, env_var_name=None, md5sum=False, version=None):
-        ''' Look for folder corresponding to a path or environmental variable and
-        return it.
-
-        Parameters
-        ----------
-        path: str
-            Path to the backpack. Cannot be used with env_var_name.
-        env_var_name: str
-            Name of an environment variable that contains a path to a backpack
-        md5sum: bool
-            If True, use the contents.json file to verify files.
-        
-        Raises
-        ------
-        ZenodoBackpackMalformedException: 
-            If the environment variable does not point to a valid ZenodoBackpack
-            i.e. a directory with a CONTENTS.json in it.
-        ZenodoBackpackVersionException:
-            If not expected Backpack version
-        '''
-
-        if path:
-            logging_description = "Path {}".format(path)
-            basefolder = path
-
-        elif env_var_name:
-            logging_description = f"Environment variable {env_var_name}"
-            if env_var_name not in os.environ:
-                logging.error(f'Could not find requested environmental variable {env_var_name}. Please check it exists.')
-                raise ZenodoBackpackMalformedException()
-            else:
-                basefolder = os.environ[env_var_name]
-        else:
-            raise ZenodoBackpackMalformedException()
-
-        if os.path.isdir(basefolder):
-            if 'CONTENTS.json' in os.listdir(basefolder):
-                logging.info('Retrieval successful. Location of backpack is: {}'.format(basefolder))
-
-                ZB = ZenodoBackpack(basefolder)
-
-                if md5sum:
-                    self.verify(basefolder)
-                elif version:
-                    if version != ZB.data_version:
-                        raise ZenodoBackpackMalformedException(
-                    f'Version in CONTENTS.json: {ZB.data_version} does not match version provided: {version}')
-
-                return ZB
-
-
-            else:
-                raise ZenodoBackpackMalformedException(f"{logging_description} does not contain a CONTENTS.json file, so is not a valid ZenodoBackpack")
-        else:
-            raise ZenodoBackpackMalformedException(f"{logging_description} is not a directory so cannot hold a ZenodoBackpack")
-
-        raise Exception("Error: acquire requires either a path or an environment variable to be specified")
-
     def _make_sure_path_exists(self, path):
         """Create directory if it does not exist."""
         if not path:
@@ -426,7 +421,6 @@ class ZenodoBackpackCreator:
         parent_dir = str(os.path.abspath(os.path.join(input_directory, os.pardir)))
         base_folder = os.path.basename(os.path.normpath(input_directory))
 
-
         contents = {}
 
         contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY_KEY): self._md5sum_file(file) for file in filenames}
@@ -434,7 +428,6 @@ class ZenodoBackpackCreator:
         # add metadata to contents:
         contents['zenodo_backpack_version'] = CURRENT_ZENODO_BACKPACK_VERSION
         contents['data_version'] = data_version
-
 
         # write json to /tmp
         tmpdir = tempfile.TemporaryDirectory()
