@@ -26,6 +26,7 @@ class ZenodoConnectionException(Exception):
 CURRENT_ZENODO_BACKPACK_VERSION = 1
 
 PAYLOAD_DIRECTORY_KEY = 'payload_directory'
+PAYLOAD_DIRECTORY = 'payload_directory'
 
 class ZenodoBackpack:
     def __init__(self, base_directory):
@@ -183,16 +184,8 @@ class ZenodoBackpackDownloader:
 
         zb_folder = os.path.abspath(os.path.join(directory, zb_folder))
 
-        # Write 'payload_directory' key
-        # This points to the payload folder containing actual data originally archived into the ZB
-
         with open(os.path.join(zb_folder, 'CONTENTS.json')) as json_file:
             contents = json.load(json_file)
-
-        contents['payload_directory'] = os.path.join(zb_folder, PAYLOAD_DIRECTORY_KEY)
-
-        with open(os.path.join(zb_folder, 'CONTENTS.json'), 'w') as json_file:
-            json.dump(contents, json_file)
 
         zb = ZenodoBackpack(zb_folder)
 
@@ -226,7 +219,7 @@ class ZenodoBackpackDownloader:
 
 
 
-        # pop identifying keys for version and zenodo_backpack_version
+        # extract identifying keys for version and zenodo_backpack_version
         version = zenodo_backpack.data_version
         zenodo_backpack_version = zenodo_backpack.zenodo_backpack_version
         payload_folder = zenodo_backpack.payload_directory_string()
@@ -423,11 +416,12 @@ class ZenodoBackpackCreator:
 
         contents = {}
 
-        contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY_KEY): self._md5sum_file(file) for file in filenames}
+        contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY): self._md5sum_file(file) for file in filenames}
 
         # add metadata to contents:
         contents['zenodo_backpack_version'] = CURRENT_ZENODO_BACKPACK_VERSION
         contents['data_version'] = data_version
+        contents[PAYLOAD_DIRECTORY_KEY] = PAYLOAD_DIRECTORY
 
         # write json to /tmp
         tmpdir = tempfile.TemporaryDirectory()
@@ -442,7 +436,7 @@ class ZenodoBackpackCreator:
         root_folder_name = f'{base_folder}.zb'
 
         archive.add(contents_json, os.path.join(root_folder_name, 'CONTENTS.json'))
-        archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY_KEY))
+        archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY))
         archive.close()
         tmpdir.cleanup()
 
