@@ -22,11 +22,15 @@ class ZenodoBackpackVersionException(Exception):
 class ZenodoConnectionException(Exception):
     pass
 
+class BrokenSymlinkException(Exception):
+    pass
 
 CURRENT_ZENODO_BACKPACK_VERSION = 1
 
 PAYLOAD_DIRECTORY_KEY = 'payload_directory'
 PAYLOAD_DIRECTORY = 'payload_directory'
+DATA_VERSION = 'data_version'
+ZB_VERSION = 'zenodo_backpack_version'
 
 class ZenodoBackpack:
     def __init__(self, base_directory):
@@ -37,11 +41,17 @@ class ZenodoBackpack:
                 self.contents = json.load(jsonfile)
         except:
             raise ZenodoBackpackMalformedException('Failed to load CONTENTS.json')
-        self.zenodo_backpack_version = self.contents['zenodo_backpack_version']
-        self.data_version = self.contents['data_version']
+        #self.zenodo_backpack_version = self.contents[ZB_VERSION]
+        #self.data_version = self.contents[DATA_VERSION]
 
     def payload_directory_string(self):
         return os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
+
+    def data_version_string(self):
+        return self.contents[DATA_VERSION]
+
+    def zenodo_backpack_version_string(self):
+        return self.contents[ZB_VERSION]
 
 
 def acquire(path=None, env_var_name=None, md5sum=False, version=None):
@@ -88,9 +98,9 @@ def acquire(path=None, env_var_name=None, md5sum=False, version=None):
             zb = ZenodoBackpack(basefolder)
 
             if version:
-                if version != zb.data_version:
+                if version != zb.data_version_string():
                     raise ZenodoBackpackMalformedException(
-                f'Version in CONTENTS.json: {zb.data_version} does not match version provided: {version}')
+                f'Version in CONTENTS.json: {zb.data_version_string()} does not match version provided: {version}')
             if md5sum:
                 ZenodoBackpackDownloader().verify(basefolder)
             return zb
@@ -220,8 +230,8 @@ class ZenodoBackpackDownloader:
 
 
         # extract identifying keys for version and zenodo_backpack_version
-        version = zenodo_backpack.data_version
-        zenodo_backpack_version = zenodo_backpack.zenodo_backpack_version
+        version = zenodo_backpack.data_version_string()
+        zenodo_backpack_version = zenodo_backpack.zenodo_backpack_version_string()
         payload_folder = zenodo_backpack.payload_directory_string()
 
         if metadata:
@@ -369,6 +379,7 @@ class ZenodoBackpackCreator:
 
     def create(self, input_directory, output_file, data_version, force=False):
 
+
         """Creates Zenodo backpack
 
                 Parameters:
@@ -419,9 +430,10 @@ class ZenodoBackpackCreator:
         contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY): self._md5sum_file(file) for file in filenames}
 
         # add metadata to contents:
-        contents['zenodo_backpack_version'] = CURRENT_ZENODO_BACKPACK_VERSION
-        contents['data_version'] = data_version
+        contents[ZB_VERSION] = CURRENT_ZENODO_BACKPACK_VERSION
+        contents[DATA_VERSION] = data_version
         contents[PAYLOAD_DIRECTORY_KEY] = PAYLOAD_DIRECTORY
+
 
         # write json to /tmp
         tmpdir = tempfile.TemporaryDirectory()
@@ -431,7 +443,7 @@ class ZenodoBackpackCreator:
 
         logging.info('Creating archive at: {}'.format(output_file))
 
-        archive = tarfile.open(os.path.join(output_file), "w|gz")
+        archive = tarfile.open(os.path.join(output_file), "w|gz", dereference=True)
 
         root_folder_name = f'{base_folder}.zb'
 
@@ -471,6 +483,12 @@ class ZenodoBackpackCreator:
         for f in os.scandir(dir):
             if f.is_dir():
                 subfolders.append(f.path)
+            if os.path.islink(f.path):
+                #make sure symlink is not broken
+                if not os.path.exists(f.path):
+                    raise BrokenSymlinkException
+                else:
+                    files.append(f.path)
             if f.is_file():
                 files.append(f.path)
 
