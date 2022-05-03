@@ -74,7 +74,7 @@ backpack = zenodo_backpack.acquire(path='/path/to/zenodobackpack/', md5sum=True)
 ```
 or by environment variable
 ```
-backpack = zenodo_backpack.acquire(env_var_name='MY_PROGRAM_DB', version=1.5.2)
+backpack = zenodo_backpack.acquire(env_var_name='MY_PROGRAM_DB', version="1.5.2")
 ```
 
 ### Working with a backpack
@@ -82,7 +82,7 @@ backpack = zenodo_backpack.acquire(env_var_name='MY_PROGRAM_DB', version=1.5.2)
 The `ZenodoBackpack` object returned by `acquire` and `download_and_extract` has instance methods to get at the downloaded data. For example, it can return the path to the payload directory within the `ZenodoBackpack` containing all the payload data:
 
 ```
-useful_data_path = zenodo_backpack.acquire(env_var_name='MyZenodoBackpack', version=1.5.2).payload_directory_string()
+useful_data_path = zenodo_backpack.acquire(env_var_name='MyZenodoBackpack', version="1.5.2").payload_directory_string()
 ```
 
 # Installation
