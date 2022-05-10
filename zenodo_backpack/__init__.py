@@ -44,8 +44,28 @@ class ZenodoBackpack:
         #self.zenodo_backpack_version = self.contents[ZB_VERSION]
         #self.data_version = self.contents[DATA_VERSION]
 
-    def payload_directory_string(self):
-        return os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
+    def payload_directory_string(self, enter_single_payload_directory=False):
+        '''Returns the payload directory string.
+
+        Parameters
+        ----------
+        enter_single_payload_directory: bool
+            If True, the payload directory contains a single directory. Return
+            that directory instead of the payload directory itself.
+        '''
+        payload_dir = os.path.join(self.base_directory, self.contents[PAYLOAD_DIRECTORY_KEY])
+        if enter_single_payload_directory:
+            files = os.listdir(payload_dir)
+            if len(files) != 1:
+                raise ZenodoBackpackMalformedException(
+                    'Payload directory contains more than one file, but enter_single_payload_directory was set to True.')
+            payload_dir = os.path.join(payload_dir, files[0])
+            if not os.path.isdir(payload_dir):
+                raise ZenodoBackpackMalformedException(
+                    'Payload directory contains a file, not a directory, but enter_single_payload_directory was set to True.')
+            return payload_dir
+        else:
+            return payload_dir
 
     def data_version_string(self):
         return self.contents[DATA_VERSION]
@@ -85,7 +105,7 @@ def acquire(path=None, env_var_name=None, md5sum=False, version=None):
     elif env_var_name:
         logging_description = f"Environment variable {env_var_name}"
         if env_var_name not in os.environ:
-            raise ZenodoBackpackMalformedException(f'Environment variable {env_var_name} was undefined. Please check it exists.')
+            raise ZenodoBackpackMalformedException(f'Environment variable {env_var_name} was undefined, when it should define the path to the ZenodoBackpack data.')
         else:
             basefolder = os.environ[env_var_name]
     else:
@@ -153,7 +173,7 @@ class ZenodoBackpackDownloader:
                 checksum = f['checksum']
 
                 # 3 retries
-                for _ in range(3):
+                for _ in range(download_retries):
                     try:
                         self._download_file(link, os.path.join(directory, filename), progress_bar)
                     except Exception as e:
@@ -164,11 +184,8 @@ class ZenodoBackpackDownloader:
                 else:
                     raise ZenodoConnectionException('Too many unsuccessful retries. Download is aborted')
 
-                if self._check_hash(os.path.join(directory, filename), checksum):
-                    logging.debug('Correct checksum for downloaded file.')
-                else:
-                    raise ZenodoBackpackMalformedException(
-                        f"Checksum is incorrect for downloaded file '{filename}'. Please download again.")
+                self.verify(acquire(directory), metadata=metadata)
+
             else:
                 logging.debug('All files have been downloaded.')
 
@@ -259,8 +276,7 @@ class ZenodoBackpackDownloader:
         # The rest of contents should only be files with md5 sums.
 
         for payload_file in zenodo_backpack.contents['md5sums'].keys():
-            filepath = os.path.join(os.path.split(payload_folder)[0], payload_file[1:]) # remove slash to enable os.path.join
-            if not self._check_hash(filepath, zenodo_backpack.contents['md5sums'][payload_file], metadata=False):
+            if not self._check_hash(payload_file, zenodo_backpack.contents['md5sums'][payload_file], metadata=False):
                 raise ZenodoBackpackMalformedException('Extracted file md5 sum does not match that in JSON file.')
 
         logging.info('Verification success.')
@@ -320,7 +336,7 @@ class ZenodoBackpackDownloader:
             value = checksum
 
         if not os.path.exists(filename):
-            raise FileNotFoundError
+            raise FileNotFoundError(filename)
         h = hashlib.new(algorithm)
         with open(filename, 'rb') as f:
             while True:
