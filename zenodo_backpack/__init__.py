@@ -184,7 +184,12 @@ class ZenodoBackpackDownloader:
                 else:
                     raise ZenodoConnectionException('Too many unsuccessful retries. Download is aborted')
 
-                self.verify(acquire(directory), metadata=metadata)
+                #self.verify(acquire(directory), metadata=metadata)
+                if self._check_hash(os.path.join(directory, filename), checksum):
+                    logging.debug('Correct checksum for downloaded file.')
+                else:
+                    raise ZenodoBackpackMalformedException(
+                        f"Checksum is incorrect for downloaded file '{filename}'. Please download again.")
 
             else:
                 logging.debug('All files have been downloaded.')
@@ -276,7 +281,8 @@ class ZenodoBackpackDownloader:
         # The rest of contents should only be files with md5 sums.
 
         for payload_file in zenodo_backpack.contents['md5sums'].keys():
-            if not self._check_hash(payload_file, zenodo_backpack.contents['md5sums'][payload_file], metadata=False):
+            filepath = os.path.join(os.path.split(payload_folder)[0], payload_file[1:]) # remove slash to enable os.path.join
+            if not self._check_hash(filepath, zenodo_backpack.contents['md5sums'][payload_file], metadata=False):
                 raise ZenodoBackpackMalformedException('Extracted file md5 sum does not match that in JSON file.')
 
         logging.info('Verification success.')
@@ -442,7 +448,7 @@ class ZenodoBackpackCreator:
         base_folder = os.path.basename(os.path.normpath(input_directory))
 
         contents = {}
-
+        
         contents['md5sums'] = {str(file).replace(parent_dir, "").replace(base_folder, PAYLOAD_DIRECTORY): self._md5sum_file(file) for file in filenames}
 
         # add metadata to contents:
@@ -501,12 +507,12 @@ class ZenodoBackpackCreator:
                 subfolders.append(f.path)
             if os.path.islink(f.path):
                 #make sure symlink is not broken
-                if not os.path.exists(f.path):
+                if not os.path.exists(os.path.abspath(f.path)):
                     raise BrokenSymlinkException
                 else:
                     files.append(f.path)
             if f.is_file():
-                files.append(f.path)
+                files.append(os.path.abspath(f.path))
 
         for dir in list(subfolders):
             sf, f = self._scandir(dir)
