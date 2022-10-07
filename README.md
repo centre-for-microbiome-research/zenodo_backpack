@@ -87,6 +87,12 @@ useful_data_path = zenodo_backpack.acquire(env_var_name='MyZenodoBackpack', vers
 
 # Installation
 
+zenodo_backpack can be installed from pypi:
+
+```
+pip install zenodo-backpack
+```
+
 The easiest way to install is using conda:
 
 ```
