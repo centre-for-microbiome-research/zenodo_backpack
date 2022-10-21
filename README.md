@@ -13,7 +13,7 @@ a `CONTENTS.json` file and compresses the data in `.tar.gz` format before
 upload. The `CONTENTS.json` file includes md5sum values for each included file
 for robust verification.
 
-It contains two main methods, which can bee accessed through the
+It contains two main methods, which can be accessed through the
 `zenodo_backpack` script or accessed as a software library:
 
 **create**: turns a target directory into a zenodo_backpack-formatted .tar.gz archive with relevant checksum and version information, ready to be uploaded to Zenodo. It is necessary to provide a data version when doing so - furthermore, when uploading this backpack to zenodo.org, the version specified on the website **must** match that provided when the ZenodoBackpack was created. This allows version tracking and version validation of the data contained within the ZenodoBackpack. 
