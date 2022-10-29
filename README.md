@@ -96,7 +96,7 @@ pip install zenodo-backpack
 The easiest way to install is using conda:
 
 ```
-conda install -c bioconda zenodo_backpack
+conda install -c conda-forge zenodo_backpack
 ```
 
 Alternatively, you can git clone the repository and either run the bin/zenodo_backpack executable or install it with setup tools using 
