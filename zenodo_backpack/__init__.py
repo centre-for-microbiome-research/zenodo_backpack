@@ -133,7 +133,7 @@ def acquire(path=None, env_var_name=None, md5sum=False, version=None):
 
 class ZenodoBackpackDownloader:
 
-    def download_and_extract(self, directory, doi, check_version=True, progress_bar=False, download_retries=3):
+    def download_and_extract(self, directory, doi, check_version=True, progress_bar=False, download_retries=3, version=None):
         """Actually do the download, to a given path. Also extract the archive,
         and then call verify on it.
 
@@ -149,6 +149,8 @@ class ZenodoBackpackDownloader:
             If True, check Zenodo metadata verifies
         download_retries: int
             Number of download attempts
+        version: None or str
+            If None, return the newest version. If specified, target that specific version.
 
         Returns a ZenodoBackpack object containing the downloaded files
         """
@@ -157,8 +159,8 @@ class ZenodoBackpackDownloader:
         # get record via DOI, then read in json metadata from records_url
         if doi is not None:
 
-            recordID = self._retrieve_record_ID(doi)
-            metadata, files = self._retrieve_record_metadata(recordID)
+            example_recordID = self._retrieve_record_ID(doi)
+            metadata, files = self._retrieve_record_metadata(example_recordID, version)
 
             # create md5sums file for download
             with open(os.path.join(directory, 'md5sums.txt'), 'wt') as md5file:
@@ -291,6 +293,7 @@ class ZenodoBackpackDownloader:
         """Parses provided DOI retrieve associated Zenodo URL which also contains record ID
         Arguments:
             DOI (str): published DOI associated with file uploaded to Zenodo
+            version: If None, return the newest version. If specified, target that specific version.
         Returns:
             recordID (str): last part of Zenodo url associated with DOI
         """
@@ -308,24 +311,56 @@ class ZenodoBackpackDownloader:
         recordID = r.url.split('/')[-1].strip()
         return recordID
 
-    def _retrieve_record_metadata(self, recordID):
+    def _retrieve_record_json(self, recordID):
         """Parses provided recordID to access Zenodo API records and download metadata json
         Arguments:
             recordID (str): Zenodo record number
         Returns:
-            js (json object): json metadata file retrieved from Zenodo API.
-            js['files'] (list): list of files associated with recordID in question
+            json response from Zenodo API
         """
         records_url = 'https://zenodo.org/api/records/'
 
         try:
             r = requests.get(records_url + recordID, timeout=15.)
+            return json.loads(r.text)
         except Exception as e:
             raise ZenodoConnectionException('Error during metadata retrieval: {}'.format(e))
 
-        if r.ok:
-            js = json.loads(r.text)
-            return js, js['files']
+    def _retrieve_versions_record_json(self, recordID, version):
+        """Parses provided recordID to access Zenodo API records and download metadata json
+        Arguments:
+            recordID (str): Zenodo record number
+            version: (str): Target that specific version.
+        Returns:
+            json response from Zenodo API
+        """
+        records_url = 'https://zenodo.org/api/records/'
+
+        try:
+            r = requests.get(records_url + recordID + '/versions', timeout=15.)
+        except Exception as e:
+            raise ZenodoConnectionException('Error during metadata retrieval: {}'.format(e))
+
+        js = json.loads(r.text)
+        versions = js['hits']['hits']
+        for v in versions:
+            if v['metadata']['version'] == version:
+                return v
+
+    def _retrieve_record_metadata(self, recordID, version):
+        """Parses provided recordID to access Zenodo API records and download metadata json
+        Arguments:
+            recordID (str): Zenodo record number
+            version: (None or str): If None, return the newest version. If specified, target that specific version.
+        Returns:
+            js (json object): json metadata file retrieved from Zenodo API.
+            js['files'] (list): list of files associated with recordID in question
+        """
+        if version is None:
+            js = self._retrieve_record_json(recordID)
+        else:
+            js = self._retrieve_versions_record_json(recordID, version)
+        return js, js['files']
 
     def _check_hash(self, filename, checksum, metadata=True):
         """Compares MD5 sum of file to checksum
