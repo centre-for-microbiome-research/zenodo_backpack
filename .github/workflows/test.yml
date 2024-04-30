@@ -24,6 +24,8 @@ jobs:
       - run: |
           conda info
           conda list
+      - name: Run import test
+        run: python bin/zenodo_backpack -h
       - name: Run pytest
         run: |
             pytest test

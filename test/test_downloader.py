@@ -22,12 +22,8 @@
 #=======================================================================
 
 import unittest
-import subprocess
 import os.path
-import tempfile
-import extern
 import sys
-import json
 
 
 sys.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)),'..')]+sys.path
@@ -76,6 +72,6 @@ class Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     # Setup debug logging
-    import logging
+    # import logging
     # logging.basicConfig(level=logging.DEBUG)
     unittest.main()
