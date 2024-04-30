@@ -5,3 +5,5 @@ dependencies:
   - python>=3.6
   - tqdm
   - requests
+  # For testing below
+  - pytest
