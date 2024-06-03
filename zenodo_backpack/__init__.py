@@ -201,8 +201,9 @@ class ZenodoBackpackDownloader:
 
         # unzip
         # use md5sums.txt file created from metadata to get files
-        downloaded_files = [[str(i) for i in line.strip().split(',')] for line in
-                            open(os.path.join(directory, 'md5sums.txt'), 'r').readlines()]
+        with open(os.path.join(directory, 'md5sums.txt')) as f:
+            downloaded_files = [[str(i) for i in line.strip().split(',')] for line in
+                                f.readlines()]
         zipped_files = [item for sublist in downloaded_files for item in sublist if '.tar.gz' in item]
 
         logging.info('Extracting files from archive...')
@@ -344,8 +345,16 @@ class ZenodoBackpackDownloader:
         js = json.loads(r.text)
         versions = js['hits']['hits']
         for v in versions:
+            if 'version' not in v['metadata']:
+                if 'doi' in v['metadata']:
+                    bad_doi = v['metadata']['doi']
+                else:
+                    bad_doi = '???'
+                logging.warning(f'Version not found in Zenodo record {bad_doi}. Is the version specified in the record\'s metadata? The authors can update this. But here, skipping this instance.')
+                continue
             if v['metadata']['version'] == version:
                 return v
+        raise ZenodoBackpackVersionException(f'Version {version} not found in Zenodo record {recordID}')
 
     def _retrieve_record_metadata(self, recordID, version):
         """Parses provided recordID to access Zenodo API records and download metadata json

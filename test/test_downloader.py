@@ -24,11 +24,12 @@
 import unittest
 import os.path
 import sys
-
+import tempfile
 
 sys.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)),'..')]+sys.path
 
 from zenodo_backpack import ZenodoBackpackDownloader
+import zenodo_backpack
 
 
 class Tests(unittest.TestCase):
@@ -69,6 +70,28 @@ class Tests(unittest.TestCase):
             }
           }
         ], ret[1])
+
+    def test_download_and_verify_and_extract(self):
+        doi = '10.5281/zenodo.11438051'
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Grab the newest version
+            ZenodoBackpackDownloader().download_and_extract(tmpdirname, doi)
+
+    def test_download_and_verify_and_extract_with_version(self):
+        doi = '10.5281/zenodo.11438051'
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Grab the newest version
+            ZenodoBackpackDownloader().download_and_extract(tmpdirname, doi, version='0.0.1')
+
+    def test_download_and_verify_and_extract_with_bad_version(self):
+        doi = '10.5281/zenodo.11438051'
+
+        with self.assertRaises(zenodo_backpack.ZenodoBackpackVersionException):
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                # Grab the newest version
+                ZenodoBackpackDownloader().download_and_extract(tmpdirname, doi, version='0.0.0.2')
 
 if __name__ == "__main__":
     # Setup debug logging
