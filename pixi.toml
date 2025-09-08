@@ -15,6 +15,7 @@ zenodo-backpack = {path = ".", editable = true}
 [feature.dev.dependencies]
 # Dev/test dependencies only
 pytest = "*"
+extern = "*"
 
 [environments]
 dev = ["dev"]
