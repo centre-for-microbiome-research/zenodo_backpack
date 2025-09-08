@@ -60,7 +60,7 @@ creator.create("/path/to/payload_directory", "path/to/archive.tar.gz", "0.1")
 
 ### Download a backpack
 
-Download a backpack from Zenodo, defined by the DOI. The version is optional, and if not provided, the latest version will be downloaded.:
+Download a backpack from Zenodo, defined by the DOI. The version is optional, and if not provided, the latest version will be downloaded. If the target file already exists, the download will resume where possible rather than starting from the beginning.:
 ```
 backpack_downloader = zenodo_backpack.ZenodoBackpackDownloader()
 backpack = backpack_downloader.download_and_extract('/path/to/download_directory', 'MY.DOI/111111', version='MY.VERSION')

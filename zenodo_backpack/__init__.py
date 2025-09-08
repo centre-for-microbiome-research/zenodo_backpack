@@ -407,21 +407,40 @@ class ZenodoBackpackDownloader:
             out_file (str): Target file path
             progress_bar (bool): Display graphical progresss bar
         """
+        headers = {}
+        mode = 'wb'
+        existing_size = 0
+
+        if os.path.exists(out_file):
+            existing_size = os.path.getsize(out_file)
+            if existing_size > 0:
+                headers['Range'] = f'bytes={existing_size}-'
+                mode = 'ab'
+
         if progress_bar:
             logging.info('Downloading {} to {}.'.format(file_url, out_file))
-            response = requests.get(file_url, stream=True)
-            total_size_in_bytes = int(response.headers.get('content-length', 0))
+            response = requests.get(file_url, stream=True, headers=headers)
+            if response.status_code == 200 and existing_size > 0:
+                # server ignored Range header, start from beginning
+                existing_size = 0
+                mode = 'wb'
+                response = requests.get(file_url, stream=True)
+            total_size_in_bytes = int(response.headers.get('content-length', 0)) + existing_size
             block_size = 1024
-            progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
-            with open(out_file, 'wb') as file:
+            progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True, initial=existing_size)
+            with open(out_file, mode) as file:
                 for data in response.iter_content(block_size):
                     progress_bar.update(len(data))
                     file.write(data)
             progress_bar.close()
 
         else:
-            with requests.get(file_url, stream=True) as r:
-                with open(out_file, 'wb') as f:
+            with requests.get(file_url, stream=True, headers=headers) as r:
+                if r.status_code == 200 and existing_size > 0:
+                    existing_size = 0
+                    mode = 'wb'
+                    r = requests.get(file_url, stream=True)
+                with open(out_file, mode) as f:
                     shutil.copyfileobj(r.raw, f)
 
     def _extract_all(self, archive, extract_path):

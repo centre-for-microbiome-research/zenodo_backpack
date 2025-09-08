@@ -25,6 +25,9 @@ import unittest
 import os.path
 import sys
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import requests
 
 sys.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)),'..')]+sys.path
 
@@ -92,6 +95,47 @@ class Tests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmpdirname:
                 # Grab the newest version
                 ZenodoBackpackDownloader().download_and_extract(tmpdirname, doi, version='0.0.0.2')
+
+    def test_resume_download(self):
+        content = b"0123456789" * 1024
+
+        class RangeRequestHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path != '/file':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                start = 0
+                range_header = self.headers.get('Range')
+                if range_header:
+                    start = int(range_header.split('=')[1].split('-')[0])
+                    self.send_response(206)
+                    self.send_header('Content-Range', f'bytes {start}-{len(content) - 1}/{len(content)}')
+                    self.send_header('Content-Length', str(len(content) - start))
+                else:
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                self.wfile.write(content[start:])
+
+        server = HTTPServer(('localhost', 0), RangeRequestHandler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+
+        try:
+            url = f'http://localhost:{server.server_port}/file'
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                partial_path = os.path.join(tmpdirname, 'download.bin')
+                r = requests.get(url, headers={'Range': 'bytes=0-999'})
+                with open(partial_path, 'wb') as f:
+                    f.write(r.content)
+                ZenodoBackpackDownloader()._download_file(url, partial_path)
+                with open(partial_path, 'rb') as f:
+                    self.assertEqual(f.read(), content)
+        finally:
+            server.shutdown()
+            thread.join()
 
 if __name__ == "__main__":
     # Setup debug logging
