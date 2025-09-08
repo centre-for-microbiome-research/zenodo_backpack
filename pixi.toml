@@ -1,0 +1,28 @@
+[workspace]
+authors = ["Ben Woodcroft <benjwoodcroft@gmail.com>"]
+channels = ["conda-forge","bioconda"]
+name = "zenodo-backpack"
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.6"
+tqdm = "*"
+requests = "*"
+
+[pypi-dependencies]
+zenodo-backpack = {path = ".", editable = true}
+
+[feature.dev.dependencies]
+# Dev/test dependencies only
+pytest = "*"
+
+[environments]
+dev = ["dev"]
+
+[tasks]
+test-base = "pytest test"
+
+[tasks.test]
+depends-on = [
+    {task = "test-base", environment = "dev"},
+]
