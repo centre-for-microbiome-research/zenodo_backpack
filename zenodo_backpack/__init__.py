@@ -8,6 +8,7 @@ from tqdm import tqdm
 import tarfile
 import tempfile
 import sys
+import gzip
 
 from .version import __version__
 
@@ -31,6 +32,55 @@ PAYLOAD_DIRECTORY_KEY = 'payload_directory'
 PAYLOAD_DIRECTORY = 'payload_directory'
 DATA_VERSION = 'data_version'
 ZB_VERSION = 'zenodo_backpack_version'
+
+GZIP = 'gzip'
+ZSTD = 'zstd'
+COMPRESSION_TYPES = (GZIP, ZSTD)
+COMPRESSION_EXTENSIONS = {GZIP: '.tar.gz', ZSTD: '.tar.zst'}
+DEFAULT_COMPRESSION_LEVELS = {GZIP: 9, ZSTD: 3}
+COMPRESSION_LEVEL_RANGES = {GZIP: (0, 9), ZSTD: (1, 22)}
+ARCHIVE_SUFFIXES = ('.tar.gz', '.tar.zst', '.tar.zstd')
+
+_GZIP_MAGIC = b'\x1f\x8b'
+_ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
+
+
+def _zstd_open(path, mode, level=None):
+    '''Open a zstd-compressed file for binary reading ('rb') or writing
+    ('wb'). Uses the standard library's compression.zstd module (Python
+    3.14+) when available, otherwise the zstandard package.'''
+    try:
+        from compression import zstd
+    except ImportError:
+        zstd = None
+    if zstd is not None:
+        if mode == 'wb':
+            return zstd.open(path, mode, level=level)
+        return zstd.open(path, mode)
+
+    try:
+        import zstandard
+    except ImportError:
+        raise ImportError(
+            'zstd support requires Python 3.14+ or the "zstandard" package '
+            '(e.g. pip install zstandard)')
+    if mode == 'wb':
+        kwargs = {} if level is None else {'level': level}
+        return zstandard.ZstdCompressor(**kwargs).stream_writer(
+            open(path, 'wb'), closefd=True)
+    return zstandard.ZstdDecompressor().stream_reader(
+        open(path, 'rb'), read_across_frames=True, closefd=True)
+
+
+def _detect_compression(path):
+    '''Return GZIP or ZSTD based on the file's magic bytes, or None.'''
+    with open(path, 'rb') as f:
+        magic = f.read(4)
+    if magic.startswith(_GZIP_MAGIC):
+        return GZIP
+    if magic.startswith(_ZSTD_MAGIC):
+        return ZSTD
+    return None
 
 class ZenodoBackpack:
     def __init__(self, base_directory):
@@ -122,7 +172,7 @@ def acquire(path=None, env_var_name=None, md5sum=False, version=None):
                     raise ZenodoBackpackMalformedException(
                 f'Version in CONTENTS.json: {zb.data_version_string()} does not match version provided: {version}')
             if md5sum:
-                ZenodoBackpackDownloader().verify(basefolder)
+                ZenodoBackpackDownloader().verify(zb, passed_version=version)
             return zb
 
         else:
@@ -204,15 +254,12 @@ class ZenodoBackpackDownloader:
         with open(os.path.join(directory, 'md5sums.txt')) as f:
             downloaded_files = [[str(i) for i in line.strip().split(',')] for line in
                                 f.readlines()]
-        zipped_files = [item for sublist in downloaded_files for item in sublist if '.tar.gz' in item]
+        zipped_files = [item for sublist in downloaded_files for item in sublist if item.endswith(ARCHIVE_SUFFIXES)]
 
         logging.info('Extracting files from archive...')
         for f in zipped_files:
             filepath = (os.path.join(directory, f))
-            logging.debug('Extracting {}'.format(filepath))
-            tf = tarfile.open(filepath)
-            zb_folder = os.path.commonprefix(tf.getnames())
-            tf.extractall(directory)
+            zb_folder = self._extract_archive(filepath, directory)
             os.remove(filepath)
 
         os.remove(os.path.join(directory, 'md5sums.txt'))
@@ -443,6 +490,24 @@ class ZenodoBackpackDownloader:
                 with open(out_file, mode) as f:
                     shutil.copyfileobj(r.raw, f)
 
+    def _extract_archive(self, filepath, directory):
+        """Extract a gzip or zstd compressed tar archive into directory.
+
+        Returns the common prefix of the archive's member names (i.e. the
+        backpack's root folder name).
+        """
+        logging.debug('Extracting {}'.format(filepath))
+        if _detect_compression(filepath) == ZSTD:
+            with _zstd_open(filepath, 'rb') as zf:
+                with tarfile.open(fileobj=zf, mode='r|') as tf:
+                    tf.extractall(directory)
+                    names = tf.getnames()
+        else:
+            with tarfile.open(filepath) as tf:
+                names = tf.getnames()
+                tf.extractall(directory)
+        return os.path.commonprefix(names)
+
     def _extract_all(self, archive, extract_path):
         for filename in archive:
             shutil.unpack_archive(filename, extract_path)
@@ -462,7 +527,8 @@ class ZenodoBackpackDownloader:
 
 class ZenodoBackpackCreator:
 
-    def create(self, input_directory, output_file, data_version, force=False):
+    def create(self, input_directory, output_file, data_version, force=False,
+               compression=None, compression_level=None):
 
 
         """Creates Zenodo backpack
@@ -472,20 +538,44 @@ class ZenodoBackpackCreator:
         input_directory: str
             Files to be packaged
         output_file: str
-            Archive .tar.gz to be created. Automatically appends '.tar.gz' if needed
-        force: True or False
-            If True, overwrite an existing output_file if required. If False,
-            don't overwrite.
+            Archive (.tar.gz or .tar.zst) to be created. Automatically appends
+            '.zb.tar.gz' or '.zb.tar.zst' if needed.
         data_version:
             Passes the data version of the file to archive
 
                 NOTE!! Same version must be specified in Zenodo metadata when file is uploaded, else error.
+        force: True or False
+            If True, overwrite an existing output_file if required. If False,
+            don't overwrite.
+        compression: None, 'gzip' or 'zstd'
+            Compression to use. If None, inferred from the output_file
+            extension ('.tar.zst' -> zstd), defaulting to gzip.
+        compression_level: None or int
+            Compression level. gzip: 0-9 (default 9), zstd: 1-22 (default 3).
 
         Returns nothing, unless input_directory is not a directory or output_file exists, which raises Exceptions
         """
 
-        if not str(output_file).endswith('.tar.gz'):
-            output_file = os.path.join('{}.zb.tar.gz'.format(str(output_file)))
+        output_file = str(output_file)
+        if compression is None:
+            compression = ZSTD if output_file.endswith(('.tar.zst', '.tar.zstd')) else GZIP
+        if compression not in COMPRESSION_TYPES:
+            raise ValueError('Unknown compression type {}, must be one of {}'.format(
+                compression, ', '.join(COMPRESSION_TYPES)))
+        if compression_level is None:
+            compression_level = DEFAULT_COMPRESSION_LEVELS[compression]
+        min_level, max_level = COMPRESSION_LEVEL_RANGES[compression]
+        if not isinstance(compression_level, int) or not min_level <= compression_level <= max_level:
+            raise ValueError('Compression level for {} must be an integer between {} and {}, found {}'.format(
+                compression, min_level, max_level, compression_level))
+
+        if output_file.endswith(ARCHIVE_SUFFIXES):
+            if compression == GZIP and not output_file.endswith('.tar.gz'):
+                raise ValueError('Output file {} does not end in .tar.gz but gzip compression was requested'.format(output_file))
+            if compression == ZSTD and output_file.endswith('.tar.gz'):
+                raise ValueError('Output file {} ends in .tar.gz but zstd compression was requested'.format(output_file))
+        else:
+            output_file = '{}.zb{}'.format(output_file, COMPRESSION_EXTENSIONS[compression])
 
         if os.path.isfile(output_file) and force is False:
             raise FileExistsError('File exists. Please use --force to overwrite existing archives.')
@@ -528,14 +618,22 @@ class ZenodoBackpackCreator:
 
         logging.info('Creating archive at: {}'.format(output_file))
 
-        archive = tarfile.open(os.path.join(output_file), "w|gz", dereference=True)
+        logging.info('Using {} compression at level {}'.format(compression, compression_level))
+
+        if compression == ZSTD:
+            compressed = _zstd_open(output_file, 'wb', level=compression_level)
+        else:
+            compressed = gzip.open(output_file, 'wb', compresslevel=compression_level)
 
         root_folder_name = f'{base_folder}.zb'
 
-        archive.add(contents_json, os.path.join(root_folder_name, 'CONTENTS.json'))
-        archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY))
-        archive.close()
-        tmpdir.cleanup()
+        try:
+            with tarfile.open(fileobj=compressed, mode="w|", dereference=True) as archive:
+                archive.add(contents_json, os.path.join(root_folder_name, 'CONTENTS.json'))
+                archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY))
+        finally:
+            compressed.close()
+            tmpdir.cleanup()
 
         logging.info('ZenodoBackpack created successfully!')
 

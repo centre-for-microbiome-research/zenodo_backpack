@@ -13,6 +13,9 @@ setup(
     license='GPL3+',
     install_requires=('tqdm',
                       'requests'),
+    extras_require={
+        'zstd': ['zstandard; python_version < "3.14"'],
+    },
     author=['Alex Chklovski','Ben Woodcroft'],
     scripts=['bin/zenodo_backpack'],
     author_email='chklovski@gmail.com',

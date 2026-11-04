@@ -51,11 +51,15 @@ if __name__ == '__main__':
     create_arguments = create_parser.add_argument_group('required arguments')
 
     create_arguments.add_argument('--input_directory', '--input-directory', '-i', help="Path to folder to be archived.", required=True)
-    create_arguments.add_argument('--output_file', '--output-file', '-o', help="Path to output file in the format *.tar.gz", required=True)
+    create_arguments.add_argument('--output_file', '--output-file', '-o', help="Path to output file in the format *.tar.gz or *.tar.zst", required=True)
     create_arguments.add_argument('--data_version', '--data-version', help="Version of data to be archived. Must correspond to version specified in Zenodo metadata.", required=True)
 
     create_arguments = create_parser.add_argument_group('additional arguments')
     create_arguments.add_argument('--force', action='store_true', help='Overwrite output file if exists [default: do not overwrite]', default=False)
+    create_arguments.add_argument('--compression', choices=zenodo_backpack.COMPRESSION_TYPES, default=None,
+                                  help='Compression to use [default: zstd if output file ends in .tar.zst, otherwise gzip]')
+    create_arguments.add_argument('--compression_level', '--compression-level', type=int, default=None,
+                                  help='Compression level. gzip: 0-9 [default 9], zstd: 1-22 [default 3]')
 
 
     download_parser = new_subparser(subparsers, 'download', download_description)
@@ -99,7 +103,8 @@ if __name__ == '__main__':
 
     if args.subparser_name == 'create':
         backpackCreator = zenodo_backpack.ZenodoBackpackCreator()
-        backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force)
+        backpackCreator.create(args.input_directory, args.output_file, args.data_version, args.force,
+                               compression=args.compression, compression_level=args.compression_level)
 
     elif args.subparser_name == 'download':
         backpackDownloader = zenodo_backpack.ZenodoBackpackDownloader()
