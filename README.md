@@ -34,6 +34,14 @@ zenodo_backpack create --input_directory <./INPUT_DIRECTORY> --data_version <VER
 
 **NOTE**: it is important that when entering metadata on Zenodo, the version specified **MUST** match that supplied with --data_version
 
+By default archives are gzip compressed at level 9. zstd compression can be used instead, either with `--compression zstd` or by naming the output file `*.tar.zst`. The compression level can be set with `--compression-level` (gzip: 0-9, default 9; zstd: 1-22, default 3):
+
+```
+zenodo_backpack create --input_directory <./INPUT_DIRECTORY> --data_version <VERSION> --output_file <./ARCHIVE.tar.zst> --compression zstd --compression-level 19
+```
+
+zstd support requires Python 3.14+ (which has `compression.zstd` built in), or the [zstandard](https://pypi.org/project/zstandard/) package for older Python versions. Downloading auto-detects whether a backpack is gzip or zstd compressed.
+
 An uploaded existing zenodo_backpack can be downloaded (--bar if a graphical progress bar is desired) and unpacked as follows: 
 
 ```
@@ -56,6 +64,11 @@ Create a new backpack in `.tar.gz` format containing the payload data folder:
 ```
 creator = zenodo_backpack.ZenodoBackpackCreator()
 creator.create("/path/to/payload_directory", "path/to/archive.tar.gz", "0.1")
+```
+
+or with zstd compression at a specified level:
+```
+creator.create("/path/to/payload_directory", "path/to/archive.tar.zst", "0.1", compression="zstd", compression_level=19)
 ```
 
 ### Download a backpack
@@ -105,4 +118,4 @@ Alternatively, you can git clone the repository and either run the bin/zenodo_ba
 python setup.py install
 ```
 
-zenodo_backpack relies on **requests** and **tqdm** to display an optional graphical progress bar. 
+zenodo_backpack relies on **requests** and **tqdm** to display an optional graphical progress bar. On Python versions before 3.14, zstd support additionally requires **zstandard** (`pip install zenodo-backpack[zstd]`).
