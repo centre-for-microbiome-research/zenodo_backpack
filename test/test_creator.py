@@ -49,6 +49,21 @@ class Tests(unittest.TestCase):
     def test_zstd_level(self):
         self._round_trip('out.tar.zst', 'out.tar.zst', b'\x28\xb5\x2f\xfd', compression='zstd', compression_level=19)
 
+    def test_output_inside_input_directory_is_excluded(self):
+        import shutil
+        for ext in ('.tar.gz', '.tar.zst'):
+            with tempfile.TemporaryDirectory() as tmp:
+                inp = os.path.join(tmp, 'input')
+                shutil.copytree(DATA, inp)
+                out = os.path.join(inp, 'out' + ext)
+                ZenodoBackpackCreator().create(inp, out, '0.1')
+                extract_dir = os.path.join(tmp, 'extracted')
+                os.mkdir(extract_dir)
+                folder = ZenodoBackpackDownloader()._extract_archive(out, extract_dir)
+                payload = os.path.join(extract_dir, folder, 'payload_directory')
+                self.assertFalse(os.path.exists(os.path.join(payload, 'out' + ext)))
+                zenodo_backpack.acquire(path=os.path.join(extract_dir, folder), md5sum=True)
+
     def test_bad_level(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):

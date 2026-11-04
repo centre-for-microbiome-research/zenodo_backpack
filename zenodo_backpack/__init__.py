@@ -628,7 +628,9 @@ class ZenodoBackpackCreator:
         root_folder_name = f'{base_folder}.zb'
 
         try:
-            with tarfile.open(fileobj=compressed, mode="w|", dereference=True) as archive:
+            # Passing name as well as fileobj lets tarfile skip the output
+            # archive if it is inside input_directory.
+            with tarfile.open(name=output_file, fileobj=compressed, mode="w|", dereference=True) as archive:
                 archive.add(contents_json, os.path.join(root_folder_name, 'CONTENTS.json'))
                 archive.add(input_directory, arcname=os.path.join(root_folder_name, PAYLOAD_DIRECTORY))
         finally:
