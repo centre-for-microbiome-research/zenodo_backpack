@@ -1,5 +1,6 @@
 import hashlib
 import requests
+import urllib3
 import shutil
 import os
 import logging
@@ -26,7 +27,23 @@ class ZenodoConnectionException(Exception):
 class BrokenSymlinkException(Exception):
     pass
 
+class DownloadSizeMismatchException(Exception):
+    pass
+
 CURRENT_ZENODO_BACKPACK_VERSION = 1
+
+# Mirrors are listed in the Zenodo record as related identifiers with this
+# relation (DataCite "IsIdenticalTo") and the URL scheme.
+MIRROR_RELATION = 'isidenticalto'
+MIRROR_SCHEME = 'url'
+
+# (connect, read) timeouts for downloads, in seconds
+DOWNLOAD_TIMEOUT = (15., 120.)
+
+MIRROR_OK = 'OK'
+MIRROR_SIZE_MISMATCH = 'SIZE_MISMATCH'
+MIRROR_MD5_MISMATCH = 'MD5_MISMATCH'
+MIRROR_UNREACHABLE = 'UNREACHABLE'
 
 PAYLOAD_DIRECTORY_KEY = 'payload_directory'
 PAYLOAD_DIRECTORY = 'payload_directory'
@@ -43,6 +60,43 @@ ARCHIVE_SUFFIXES = ('.tar.gz', '.tar.zst', '.tar.zstd')
 
 _GZIP_MAGIC = b'\x1f\x8b'
 _ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
+
+
+def mirror_urls_from_metadata(metadata):
+    '''Return the mirror URLs listed in a Zenodo record's metadata, in order.
+
+    A mirror is a related identifier with relation "Is identical to" and
+    scheme "url". Both the legacy Zenodo API form ({"relation": "isIdenticalTo"})
+    and the InvenioRDM form ({"relation_type": {"id": "isidenticalto"}}) are
+    understood.'''
+    related = (metadata.get('metadata') or {}).get('related_identifiers') or []
+    urls = []
+    for r in related:
+        relation = r.get('relation')
+        if relation is None:
+            relation = (r.get('relation_type') or {}).get('id', '')
+        scheme = r.get('scheme') or ''
+        identifier = r.get('identifier') or ''
+        if str(relation).lower() == MIRROR_RELATION and str(scheme).lower() == MIRROR_SCHEME \
+                and identifier.startswith(('http://', 'https://')):
+            if identifier not in urls:
+                urls.append(identifier)
+    return urls
+
+
+class MirrorCheckResult:
+    '''Result of checking one mirror URL against a Zenodo record.'''
+    def __init__(self, url, status, detail=''):
+        self.url = url
+        self.status = status
+        self.detail = detail
+
+    @property
+    def ok(self):
+        return self.status == MIRROR_OK
+
+    def __repr__(self):
+        return 'MirrorCheckResult({!r}, {!r}, {!r})'.format(self.url, self.status, self.detail)
 
 
 def _zstd_open(path, mode, level=None):
@@ -183,9 +237,16 @@ def acquire(path=None, env_var_name=None, md5sum=False, version=None):
 
 class ZenodoBackpackDownloader:
 
-    def download_and_extract(self, directory, doi, check_version=True, progress_bar=False, download_retries=3, version=None):
+    def download_and_extract(self, directory, doi, check_version=True, progress_bar=False, download_retries=3, version=None,
+                             use_mirrors=True):
         """Actually do the download, to a given path. Also extract the archive,
         and then call verify on it.
+
+        The Zenodo record is always the authority for the file name, size,
+        md5sum and version. If the record lists mirrors (related identifiers
+        with relation "Is identical to" and a URL), they are tried first, in
+        the order listed, falling back to Zenodo itself. A file from any source
+        is only accepted if its md5sum matches the Zenodo record.
 
         Parameters
         ----------
@@ -198,77 +259,50 @@ class ZenodoBackpackDownloader:
         check_version: bool
             If True, check Zenodo metadata verifies
         download_retries: int
-            Number of download attempts
+            Number of download attempts per source
         version: None or str
             If None, return the newest version. If specified, target that specific version.
+        use_mirrors: bool
+            If True (the default), try mirrors listed in the Zenodo record
+            before Zenodo itself. If False, only download from Zenodo.
 
         Returns a ZenodoBackpack object containing the downloaded files
         """
+        if doi is None:
+            raise ZenodoConnectionException('Record could not get accessed.')
         self._make_sure_path_exists(directory)
 
         # get record via DOI, then read in json metadata from records_url
-        if doi is not None:
+        record_id = self._retrieve_record_ID(doi)
+        metadata, files = self._retrieve_record_metadata(record_id, version)
+        zenodo_file = self._single_file(files)
 
-            example_recordID = self._retrieve_record_ID(doi)
-            metadata, files = self._retrieve_record_metadata(example_recordID, version)
+        filename = zenodo_file['key'].split('/')[-1]
+        if not filename.endswith(ARCHIVE_SUFFIXES):
+            raise ZenodoBackpackMalformedException(
+                "File '{}' in Zenodo record is not a zenodo_backpack archive (expected one of {})".format(
+                    filename, ', '.join(ARCHIVE_SUFFIXES)))
+        archive_path = os.path.join(directory, filename)
 
-            # create md5sums file for download
-            with open(os.path.join(directory, 'md5sums.txt'), 'wt') as md5file:
-                for file in files:
-                    fname = str(file['key']).split('/')[-1]
-                    checksum = str(file['checksum']).split(':')[-1]
-                    md5file.write('{},{}\n'.format(checksum, fname))
+        sources = []
+        if use_mirrors:
+            mirrors = mirror_urls_from_metadata(metadata)
+            if mirrors:
+                logging.info('Zenodo record lists {} mirror(s)'.format(len(mirrors)))
+            sources.extend(mirrors)
+        zenodo_link = zenodo_file['links']['self']
+        if zenodo_link not in sources:
+            sources.append(zenodo_link)
 
-            for f in files:
-                link = f['links']['self']
-                filename = f['key'].split('/')[-1]
-                checksum = f['checksum']
-
-                # 3 retries
-                for _ in range(download_retries):
-                    try:
-                        self._download_file(link, os.path.join(directory, filename), progress_bar)
-                    except Exception as e:
-                        logging.error('Error during download: {}'.format(e))
-                        raise ZenodoConnectionException
-                    else:
-                        break
-                else:
-                    raise ZenodoConnectionException('Too many unsuccessful retries. Download is aborted')
-
-                #self.verify(acquire(directory), metadata=metadata)
-                if self._check_hash(os.path.join(directory, filename), checksum):
-                    logging.debug('Correct checksum for downloaded file.')
-                else:
-                    raise ZenodoBackpackMalformedException(
-                        f"Checksum is incorrect for downloaded file '{filename}'. Please download again.")
-
-            else:
-                logging.debug('All files have been downloaded.')
-
-        else:
-            raise ZenodoConnectionException('Record could not get accessed.')
-
-        # unzip
-        # use md5sums.txt file created from metadata to get files
-        with open(os.path.join(directory, 'md5sums.txt')) as f:
-            downloaded_files = [[str(i) for i in line.strip().split(',')] for line in
-                                f.readlines()]
-        zipped_files = [item for sublist in downloaded_files for item in sublist if item.endswith(ARCHIVE_SUFFIXES)]
+        self._download_from_sources(
+            sources, archive_path, zenodo_file['checksum'], expected_size=zenodo_file.get('size'),
+            progress_bar=progress_bar, download_retries=download_retries)
 
         logging.info('Extracting files from archive...')
-        for f in zipped_files:
-            filepath = (os.path.join(directory, f))
-            zb_folder = self._extract_archive(filepath, directory)
-            os.remove(filepath)
-
-        os.remove(os.path.join(directory, 'md5sums.txt'))
+        zb_folder = self._extract_archive(archive_path, directory)
+        os.remove(archive_path)
 
         zb_folder = os.path.abspath(os.path.join(directory, zb_folder))
-
-        with open(os.path.join(zb_folder, 'CONTENTS.json')) as json_file:
-            contents = json.load(json_file)
-
         zb = ZenodoBackpack(zb_folder)
 
         if not check_version:
@@ -277,6 +311,140 @@ class ZenodoBackpackDownloader:
             self.verify(zb, metadata=metadata)
 
         return zb
+
+    def check_mirrors(self, doi, version=None, mirrors=None, size_only=False, progress_bar=False, working_directory=None):
+        """Check that mirror URLs serve exactly the file in a Zenodo record.
+
+        Parameters
+        ----------
+        doi: str
+            DOI of the Zenodo series
+        version: None or str
+            If None, use the newest version. If specified, target that specific version.
+        mirrors: None or list of str
+            URLs to check. If None, check the mirrors listed in the Zenodo
+            record. Use this to check a candidate mirror before adding it to
+            the record.
+        size_only: bool
+            If True, only compare the size reported by the server with the
+            Zenodo record (no download). Otherwise download the file and
+            compare md5sums.
+        progress_bar: bool
+            Show a progress bar while downloading.
+        working_directory: None or str
+            Where to temporarily download files to [default: system temporary directory]
+
+        Returns a list of MirrorCheckResult, one per URL, in order.
+        """
+        record_id = self._retrieve_record_ID(doi)
+        metadata, files = self._retrieve_record_metadata(record_id, version)
+        zenodo_file = self._single_file(files)
+        expected_size = zenodo_file.get('size')
+        checksum = zenodo_file['checksum']
+        filename = zenodo_file['key'].split('/')[-1]
+
+        if mirrors is None:
+            mirrors = mirror_urls_from_metadata(metadata)
+            if not mirrors:
+                logging.warning('No mirrors are listed in the Zenodo record. To list one, add a related '
+                                'identifier with relation "Is identical to" and the mirror URL.')
+
+        results = []
+        for url in mirrors:
+            logging.info('Checking mirror {}'.format(url))
+            if size_only:
+                result = self._check_mirror_size(url, expected_size)
+            else:
+                with tempfile.TemporaryDirectory(dir=working_directory) as tmp:
+                    out = os.path.join(tmp, filename)
+                    try:
+                        self._download_file(url, out, progress_bar=progress_bar, expected_size=expected_size)
+                    except DownloadSizeMismatchException as e:
+                        result = MirrorCheckResult(url, MIRROR_SIZE_MISMATCH, str(e))
+                    except requests.RequestException as e:
+                        result = MirrorCheckResult(url, MIRROR_UNREACHABLE, str(e))
+                    else:
+                        if self._check_hash(out, checksum):
+                            result = MirrorCheckResult(url, MIRROR_OK, 'md5sum matches {}'.format(checksum))
+                        else:
+                            result = MirrorCheckResult(
+                                url, MIRROR_MD5_MISMATCH, 'md5sum does not match {}'.format(checksum))
+            if result.ok:
+                logging.info('{}: {} ({})'.format(url, result.status, result.detail))
+            else:
+                logging.warning('{}: {} ({})'.format(url, result.status, result.detail))
+            results.append(result)
+        return results
+
+    def _check_mirror_size(self, url, expected_size):
+        try:
+            r = requests.head(url, allow_redirects=True, timeout=DOWNLOAD_TIMEOUT)
+            if r.status_code >= 400 or r.headers.get('content-length') is None:
+                # Some servers don't support HEAD or omit the length; read the GET headers only.
+                r.close()
+                r = requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT)
+                r.close()
+            r.raise_for_status()
+        except requests.RequestException as e:
+            return MirrorCheckResult(url, MIRROR_UNREACHABLE, str(e))
+        length = r.headers.get('content-length')
+        if length is None:
+            return MirrorCheckResult(url, MIRROR_UNREACHABLE, 'Server did not report a Content-Length')
+        if expected_size is not None and int(length) != int(expected_size):
+            return MirrorCheckResult(
+                url, MIRROR_SIZE_MISMATCH, 'size {} does not match Zenodo size {}'.format(length, expected_size))
+        return MirrorCheckResult(url, MIRROR_OK, 'size {} matches (md5sum not checked)'.format(length))
+
+    def _single_file(self, files):
+        if len(files) != 1:
+            raise ZenodoBackpackMalformedException(
+                'Expected exactly one file in the Zenodo record, found {}: {}'.format(
+                    len(files), ', '.join(str(f.get('key')) for f in files)))
+        return files[0]
+
+    def _download_from_sources(self, sources, out_file, checksum, expected_size=None, progress_bar=False,
+                               download_retries=3):
+        """Download a file from the first source that provides it with the
+        correct md5sum. Each source is retried up to download_retries times
+        for transient errors. Returns the URL that was used."""
+        failures = []
+        for i, url in enumerate(sources):
+            if i > 0 and os.path.exists(out_file):
+                # Never resume a partial download from a different source
+                os.remove(out_file)
+            error = None
+            for attempt in range(download_retries):
+                try:
+                    self._download_file(url, out_file, progress_bar=progress_bar, expected_size=expected_size)
+                except DownloadSizeMismatchException as e:
+                    error = e
+                    break
+                except requests.HTTPError as e:
+                    error = e
+                    if e.response is not None and e.response.status_code < 500:
+                        break  # client errors like 404 won't be fixed by retrying
+                    logging.warning('Error downloading from {} (attempt {}/{}): {}'.format(
+                        url, attempt + 1, download_retries, e))
+                except requests.RequestException as e:
+                    error = e
+                    logging.warning('Error downloading from {} (attempt {}/{}): {}'.format(
+                        url, attempt + 1, download_retries, e))
+                else:
+                    error = None
+                    break
+
+            if error is None:
+                if self._check_hash(out_file, checksum):
+                    logging.info('Downloaded {} with correct checksum'.format(url))
+                    return url
+                error = 'md5sum does not match Zenodo record ({})'.format(checksum)
+            logging.warning('Could not use {}: {}'.format(url, error))
+            failures.append('{}: {}'.format(url, error))
+            if os.path.exists(out_file):
+                os.remove(out_file)
+
+        raise ZenodoConnectionException(
+            'Could not download a file with the correct checksum from any source:\n' + '\n'.join(failures))
 
     def verify(self, zenodo_backpack, metadata=None, passed_version=None):
         """Verify that a downloaded directory is in working order.
@@ -445,50 +613,82 @@ class ZenodoBackpackDownloader:
 
         return value == digest
 
-    def _download_file(self, file_url, out_file, progress_bar=False):
+    def _download_file(self, file_url, out_file, progress_bar=False, expected_size=None):
         """Download a file to disk
-        Streams a file from URL to disk.
+        Streams a file from URL to disk, resuming a partial download of
+        out_file if the server supports Range requests.
         Can optionally use tqdm for a visual download bar
         Arguments:
             file_url (str): URL of file to download
             out_file (str): Target file path
             progress_bar (bool): Display graphical progresss bar
+            expected_size (int or None): Expected size of the complete file
+                in bytes. If the server reports a different size,
+                DownloadSizeMismatchException is raised before downloading.
+        Raises requests.RequestException (including requests.HTTPError) on
+        connection or HTTP errors.
         """
-        headers = {}
-        mode = 'wb'
-        existing_size = 0
-
-        if os.path.exists(out_file):
-            existing_size = os.path.getsize(out_file)
-            if existing_size > 0:
-                headers['Range'] = f'bytes={existing_size}-'
-                mode = 'ab'
-
-        if progress_bar:
-            logging.info('Downloading {} to {}.'.format(file_url, out_file))
-            response = requests.get(file_url, stream=True, headers=headers)
-            if response.status_code == 200 and existing_size > 0:
-                # server ignored Range header, start from beginning
+        existing_size = os.path.getsize(out_file) if os.path.exists(out_file) else 0
+        if expected_size is not None:
+            expected_size = int(expected_size)
+            if existing_size == expected_size:
+                logging.debug('{} already has the expected size, not downloading'.format(out_file))
+                return
+            if existing_size > expected_size:
+                os.remove(out_file)
                 existing_size = 0
-                mode = 'wb'
-                response = requests.get(file_url, stream=True)
-            total_size_in_bytes = int(response.headers.get('content-length', 0)) + existing_size
-            block_size = 1024
-            progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True, initial=existing_size)
-            with open(out_file, mode) as file:
-                for data in response.iter_content(block_size):
-                    progress_bar.update(len(data))
-                    file.write(data)
-            progress_bar.close()
 
-        else:
-            with requests.get(file_url, stream=True, headers=headers) as r:
-                if r.status_code == 200 and existing_size > 0:
-                    existing_size = 0
-                    mode = 'wb'
-                    r = requests.get(file_url, stream=True)
+        headers = {}
+        if existing_size > 0:
+            headers['Range'] = 'bytes={}-'.format(existing_size)
+
+        logging.info('Downloading {} to {}'.format(file_url, out_file))
+        with requests.get(file_url, stream=True, headers=headers, timeout=DOWNLOAD_TIMEOUT) as r:
+            if r.status_code == 416 and existing_size > 0:
+                # Nothing more to fetch; the checksum decides if it is complete.
+                return
+            r.raise_for_status()
+
+            mode = 'wb'
+            if r.status_code == 206 and existing_size > 0:
+                content_range = r.headers.get('content-range', '')
+                if content_range.startswith('bytes {}-'.format(existing_size)):
+                    mode = 'ab'
+                else:
+                    raise requests.HTTPError(
+                        'Unexpected Content-Range "{}" when resuming from byte {}'.format(
+                            content_range, existing_size), response=r)
+            if mode == 'wb':
+                # Server ignored the Range header, start from the beginning
+                existing_size = 0
+
+            content_length = r.headers.get('content-length')
+            total_size = int(content_length) + existing_size if content_length is not None else None
+            if expected_size is not None and total_size is not None and total_size != expected_size:
+                raise DownloadSizeMismatchException(
+                    'Server reports size {} but Zenodo record size is {}'.format(total_size, expected_size))
+
+            bar = None
+            if progress_bar:
+                bar = tqdm(total=total_size, unit='iB', unit_scale=True, initial=existing_size)
+            try:
                 with open(out_file, mode) as f:
-                    shutil.copyfileobj(r.raw, f)
+                    # decode_content=False keeps the exact bytes served, so
+                    # Content-Encoding can never alter the archive.
+                    try:
+                        for chunk in r.raw.stream(1024 * 1024, decode_content=False):
+                            f.write(chunk)
+                            if bar is not None:
+                                bar.update(len(chunk))
+                    except urllib3.exceptions.ReadTimeoutError as e:
+                        # Reading r.raw bypasses requests' own exception
+                        # wrapping, so translate for callers to retry or fall back.
+                        raise requests.exceptions.ReadTimeout(e, request=r.request, response=r) from e
+                    except urllib3.exceptions.HTTPError as e:
+                        raise requests.exceptions.ConnectionError(e, request=r.request, response=r) from e
+            finally:
+                if bar is not None:
+                    bar.close()
 
     def _extract_archive(self, filepath, directory):
         """Extract a gzip or zstd compressed tar archive into directory.
