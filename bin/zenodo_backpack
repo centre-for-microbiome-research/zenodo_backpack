@@ -76,6 +76,30 @@ if __name__ == '__main__':
 
     download_arguments.add_argument('--no_check_version', '--no-check-version', help="Do not verify version specified in CONTENTS.json in archive matches official Zenodo record. Default: [Verify]",
                                   action='store_true', default=False)
+    download_arguments.add_argument('--version_of_data', '--version-of-data', help="Download this version of the data [default: newest version]",
+                                  default=None)
+    download_arguments.add_argument('--no_mirrors', '--no-mirrors', help="Download only from Zenodo, ignoring mirrors listed in the Zenodo record. Default: [try mirrors first]",
+                                  action='store_true', default=False)
+
+
+    check_mirrors_description = 'Check that mirrors serve exactly the file in a Zenodo record (same size and md5sum).\n\n' \
+        'Mirrors are listed in a Zenodo record as related identifiers with relation "Is identical to" and the mirror URL.\n' \
+        'With --mirror, check candidate URLs before adding them to the record. Without, check the mirrors already listed.\n\n' \
+        '\t\tExample use: zenodo_backpack check-mirrors --doi <DOI> --mirror https://example.org/my.zb.tar.gz'
+    check_mirrors_parser = new_subparser(subparsers, 'check-mirrors', check_mirrors_description)
+    check_mirrors_arguments = check_mirrors_parser.add_argument_group('required arguments')
+    check_mirrors_arguments.add_argument('--doi', help="DOI of Zenodo record.", required=True)
+    check_mirrors_arguments = check_mirrors_parser.add_argument_group('additional arguments')
+    check_mirrors_arguments.add_argument('--mirror', action='append', default=None,
+                                         help="Mirror URL to check (can be given multiple times). Default: [mirrors listed in the Zenodo record]")
+    check_mirrors_arguments.add_argument('--version_of_data', '--version-of-data', help="Check this version of the data [default: newest version]",
+                                         default=None)
+    check_mirrors_arguments.add_argument('--size_only', '--size-only', action='store_true', default=False,
+                                         help="Only compare file size reported by the server, without downloading. Default: [download and compare md5sum]")
+    check_mirrors_arguments.add_argument('--working_directory', '--working-directory', default=None,
+                                         help="Directory to temporarily download to [default: system temporary directory]")
+    check_mirrors_arguments.add_argument('--bar', help="Show graphical progress bar for download. Default: [do not show]",
+                                         action='store_true', default=False)
 
 
     if (len(sys.argv) == 1 or sys.argv[1] == '-h' or sys.argv[1] == '--help' or sys.argv[1] == 'help'):
@@ -83,6 +107,7 @@ if __name__ == '__main__':
         print('\n\n  General usage:')
         print('    zenodo_backpack create         -> %s' % 'Creates a *.tar.gz zenodo_backpack archive from target directory')
         print('    zenodo_backpack download       -> %s' % 'Given a DOI, downloads file from Zenodo and extracts it to output_directory.')
+        print('    zenodo_backpack check-mirrors  -> %s' % 'Check that mirror URLs serve exactly the file in a Zenodo record.')
         print('\n\n  Use zenodo_backpack <command> -h for command-specific help.\n')
         sys.exit(0)
 
@@ -108,6 +133,17 @@ if __name__ == '__main__':
 
     elif args.subparser_name == 'download':
         backpackDownloader = zenodo_backpack.ZenodoBackpackDownloader()
-        backpackDownloader.download_and_extract(args.output_directory, args.doi, not args.no_check_version, args.bar)
+        backpackDownloader.download_and_extract(args.output_directory, args.doi, not args.no_check_version, args.bar,
+                                                version=args.version_of_data, use_mirrors=not args.no_mirrors)
+
+    elif args.subparser_name == 'check-mirrors':
+        backpackDownloader = zenodo_backpack.ZenodoBackpackDownloader()
+        results = backpackDownloader.check_mirrors(
+            args.doi, version=args.version_of_data, mirrors=args.mirror, size_only=args.size_only,
+            progress_bar=args.bar, working_directory=args.working_directory)
+        for r in results:
+            print('\t'.join([r.status, r.url, r.detail]))
+        if not results or not all(r.ok for r in results):
+            sys.exit(1)
 
 

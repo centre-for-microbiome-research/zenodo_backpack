@@ -48,6 +48,26 @@ An uploaded existing zenodo_backpack can be downloaded (--bar if a graphical pro
 zenodo_backpack download --doi <MY.DOI/111> --output_directory <OUTPUT_DIRECTORY> --bar
 ```
 
+## Mirrors
+
+A backpack can be served from mirrors as well as Zenodo, e.g. a faster institutional server. The Zenodo record stays the authority: it lists the mirrors, and its file name, size, md5sum and version are always enforced, so a broken or out-of-date mirror can never produce a wrong backpack. It just means a fallback to the next source.
+
+To add a mirror:
+
+1. Upload the **exact same** `.tar.gz`/`.tar.zst` file that was uploaded to Zenodo to the mirror. Do not recompress it, or its md5sum will differ.
+2. Check the mirror serves the right file before adding it to the record:
+   ```
+   zenodo_backpack check-mirrors --doi <MY.DOI/111> --mirror https://example.org/path/to/my.zb.tar.gz
+   ```
+3. Edit the Zenodo record and add a *Related work* entry with relation **Is identical to**, the mirror URL as identifier, and scheme URL. Published records' metadata can be edited without creating a new version, so mirrors can be added or removed at any time. Each version has its own metadata, so add the mirror to every version it serves.
+4. Optionally, check the mirrors now listed in the record (add `--version-of-data` for a version other than the newest):
+   ```
+   zenodo_backpack check-mirrors --doi <MY.DOI/111>
+   ```
+   `--size-only` compares sizes only, without downloading. `check-mirrors` exits non-zero if any mirror fails.
+
+When downloading, mirrors are tried first, in the order they are listed in the record, then Zenodo. A source is skipped if it is unreachable, reports the wrong size, or serves a file whose md5sum doesn't match the Zenodo record. Use `--no-mirrors` (or `use_mirrors=False` in the API) to download from Zenodo only.
+
 ## API Usage
 
 You can also import zenodo_backpack as a module: 
@@ -77,6 +97,12 @@ Download a backpack from Zenodo, defined by the DOI. The version is optional, an
 ```
 backpack_downloader = zenodo_backpack.ZenodoBackpackDownloader()
 backpack = backpack_downloader.download_and_extract('/path/to/download_directory', 'MY.DOI/111111', version='MY.VERSION')
+```
+
+Mirrors listed in the Zenodo record are used in preference to Zenodo (see [Mirrors](#mirrors)); pass `use_mirrors=False` to download only from Zenodo. Mirrors can be checked with:
+```
+results = backpack_downloader.check_mirrors('MY.DOI/111111', mirrors=['https://example.org/my.zb.tar.gz'])
+print([(r.url, r.status, r.detail) for r in results])
 ```
 
 ### Read a backpack that is already downloaded
