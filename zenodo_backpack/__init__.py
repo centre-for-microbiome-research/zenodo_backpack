@@ -1,5 +1,6 @@
 import hashlib
 import requests
+import urllib3
 import shutil
 import os
 import logging
@@ -674,10 +675,17 @@ class ZenodoBackpackDownloader:
                 with open(out_file, mode) as f:
                     # decode_content=False keeps the exact bytes served, so
                     # Content-Encoding can never alter the archive.
-                    for chunk in r.raw.stream(1024 * 1024, decode_content=False):
-                        f.write(chunk)
-                        if bar is not None:
-                            bar.update(len(chunk))
+                    try:
+                        for chunk in r.raw.stream(1024 * 1024, decode_content=False):
+                            f.write(chunk)
+                            if bar is not None:
+                                bar.update(len(chunk))
+                    except urllib3.exceptions.ReadTimeoutError as e:
+                        # Reading r.raw bypasses requests' own exception
+                        # wrapping, so translate for callers to retry or fall back.
+                        raise requests.exceptions.ReadTimeout(e, request=r.request, response=r) from e
+                    except urllib3.exceptions.HTTPError as e:
+                        raise requests.exceptions.ConnectionError(e, request=r.request, response=r) from e
             finally:
                 if bar is not None:
                     bar.close()

@@ -75,6 +75,16 @@ class Tests(unittest.TestCase):
                     self.wfile.write(body[start:])
 
             def do_GET(self):
+                if self.path.split('?')[0] == '/truncated/' + ARCHIVE_NAME:
+                    # Advertise the full size but close the connection early
+                    requests_log.append((self.command, self.path))
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content[:10])
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
                 self._respond(True)
 
             def do_HEAD(self):
@@ -177,6 +187,16 @@ class Tests(unittest.TestCase):
         self.download(self.metadata(self.mirrors_rel('http://localhost:1/' + ARCHIVE_NAME)),
                       download_retries=1)
         self.assertEqual(['/zenodo/' + ARCHIVE_NAME], self.gets())
+
+    def test_truncated_mirror_falls_back(self):
+        self.download(self.metadata(self.mirrors_rel(self.url('truncated'))), download_retries=2)
+        # Connection errors mid-stream are retried, then Zenodo is used
+        self.assertEqual(['/truncated/' + ARCHIVE_NAME] * 2 + ['/zenodo/' + ARCHIVE_NAME], self.gets())
+
+    def test_check_truncated_mirror(self):
+        d = self.downloader(self.metadata())
+        results = d.check_mirrors('10.5281/zenodo.12345', mirrors=[self.url('truncated')])
+        self.assertEqual([zenodo_backpack.MIRROR_UNREACHABLE], [r.status for r in results])
 
     def test_mirrors_tried_in_record_order(self):
         self.download(self.metadata(self.mirrors_rel(self.url('missing'), self.url('good'))))
